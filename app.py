@@ -241,7 +241,6 @@ HIDDEN_FIELDS = ("password", "contrasena", "contraseña")
 SECRET_JSON_PATHS = (
     Path(".streamlit/secrets.toml"),
     Path(".streamlit/secret.toml"),
-    Path(".streamlit/secrets.toml"),
     Path(".streamlit/firebase-service-account.json"),
 )
 

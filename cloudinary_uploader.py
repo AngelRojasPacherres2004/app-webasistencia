@@ -11,7 +11,6 @@ import streamlit as st
 CLOUDINARY_SECRET_PATHS = (
     Path(".streamlit/secrets.toml"),
     Path(".streamlit/secret.toml"),
-    Path(".streamlit/secrets.toml"),
 )
 
 
