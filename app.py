@@ -253,10 +253,17 @@ def clean_service_account(service_account):
     # Asegura que la llave privada no tenga espacios extra y procese bien los saltos de línea
     if "private_key" in service_account and isinstance(service_account["private_key"], str):
         key = service_account["private_key"]
-        # Reemplaza saltos de línea literales y limpia espacios/comillas accidentales
-        key = key.replace("\\n", "\n").strip()
-        if not key.startswith("-----BEGIN"): key = "-----BEGIN" + key.split("-----BEGIN")[-1]
-        service_account["private_key"] = key
+        # Limpiar comillas accidentales y espacios (común al pegar desde JSON a Streamlit Secrets)
+        key = key.strip().strip('"').strip("'").strip()
+        # Convertir representaciones literales de \n en saltos de línea reales
+        key = key.replace("\\n", "\n")
+        # Forzar el inicio en el marcador de apertura
+        if "-----BEGIN" in key:
+            key = "-----BEGIN" + key.split("-----BEGIN")[-1]
+        # Forzar el fin en el marcador de cierre (esto elimina el carácter 61 "=" inválido si hay basura después)
+        if "-----END PRIVATE KEY-----" in key:
+            key = key.split("-----END PRIVATE KEY-----")[0] + "-----END PRIVATE KEY-----"
+        service_account["private_key"] = key.strip()
     
     return service_account
 
