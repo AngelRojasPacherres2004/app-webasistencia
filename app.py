@@ -305,8 +305,9 @@ def get_firestore_client():
 
 def load_service_account():
     try:
-        if "firebase_service_account" in st.secrets:
-            return dict(st.secrets["firebase_service_account"])
+        for key in ["firebase_service_account", "google_service_account"]:
+            if key in st.secrets:
+                return dict(st.secrets[key])
     except Exception:
         pass
 
@@ -327,8 +328,9 @@ def load_service_account_file(path):
         service_account, _ = json.JSONDecoder().raw_decode(raw_content)
         return service_account
     parsed = tomllib.loads(raw_content)
-    if "firebase_service_account" in parsed:
-        return dict(parsed["firebase_service_account"])
+    for key in ["firebase_service_account", "google_service_account"]:
+        if key in parsed:
+            return dict(parsed[key])
     if "type" in parsed and "project_id" in parsed:
         return parsed
     st.error(f"No pude leer credenciales válidas desde `{path}`.")
