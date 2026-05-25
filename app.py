@@ -324,6 +324,7 @@ def load_service_account():
 
 def load_service_account_file(path):
     raw_content = path.read_text(encoding="utf-8").strip()
+    raw_content = path.read_text(encoding="utf-8-sig").strip()
     if raw_content.startswith("{"):
         service_account, _ = json.JSONDecoder().raw_decode(raw_content)
         return service_account
