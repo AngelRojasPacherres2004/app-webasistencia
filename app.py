@@ -252,7 +252,11 @@ def clean_service_account(service_account):
     
     # Asegura que la llave privada no tenga espacios extra y procese bien los saltos de línea
     if "private_key" in service_account and isinstance(service_account["private_key"], str):
-        service_account["private_key"] = service_account["private_key"].replace("\\n", "\n").strip()
+        key = service_account["private_key"]
+        # Reemplaza saltos de línea literales y limpia espacios/comillas accidentales
+        key = key.replace("\\n", "\n").strip()
+        if not key.startswith("-----BEGIN"): key = "-----BEGIN" + key.split("-----BEGIN")[-1]
+        service_account["private_key"] = key
     
     return service_account
 
@@ -316,7 +320,7 @@ def get_firestore_client():
 
 def load_service_account():
     try:
-        for key in ["firebase_service_account", "google_service_account"]:
+        for key in ["firebase", "firebase_service_account", "google_service_account"]:
             if key in st.secrets:
                 return clean_service_account(dict(st.secrets[key]))
     except Exception:
@@ -339,7 +343,7 @@ def load_service_account_file(path):
         service_account, _ = json.JSONDecoder().raw_decode(raw_content)
         return clean_service_account(service_account)
     parsed = tomllib.loads(raw_content)
-    for key in ["firebase_service_account", "google_service_account"]:
+    for key in ["firebase", "firebase_service_account", "google_service_account"]:
         if key in parsed:
             return clean_service_account(dict(parsed[key]))
     if "type" in parsed and "project_id" in parsed:
