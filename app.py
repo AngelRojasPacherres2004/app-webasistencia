@@ -241,9 +241,21 @@ HIDDEN_FIELDS = ("password", "contrasena", "contraseña")
 SECRET_JSON_PATHS = (
     Path(".streamlit/secrets.toml"),
     Path(".streamlit/secret.toml"),
-    Path(".streamlit/secrets,toml"),
+    Path(".streamlit/secrets.toml"),
     Path(".streamlit/firebase-service-account.json"),
 )
+
+
+def clean_service_account(service_account):
+    """Limpia y valida el diccionario de la cuenta de servicio."""
+    if not service_account or not isinstance(service_account, dict):
+        return service_account
+    
+    # Asegura que la llave privada no tenga espacios extra y procese bien los saltos de línea
+    if "private_key" in service_account and isinstance(service_account["private_key"], str):
+        service_account["private_key"] = service_account["private_key"].replace("\\n", "\n").strip()
+    
+    return service_account
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -307,7 +319,7 @@ def load_service_account():
     try:
         for key in ["firebase_service_account", "google_service_account"]:
             if key in st.secrets:
-                return dict(st.secrets[key])
+                return clean_service_account(dict(st.secrets[key]))
     except Exception:
         pass
 
@@ -323,17 +335,16 @@ def load_service_account():
 
 
 def load_service_account_file(path):
-    raw_content = path.read_text(encoding="utf-8").strip()
     raw_content = path.read_text(encoding="utf-8-sig").strip()
     if raw_content.startswith("{"):
         service_account, _ = json.JSONDecoder().raw_decode(raw_content)
-        return service_account
+        return clean_service_account(service_account)
     parsed = tomllib.loads(raw_content)
     for key in ["firebase_service_account", "google_service_account"]:
         if key in parsed:
-            return dict(parsed[key])
+            return clean_service_account(dict(parsed[key]))
     if "type" in parsed and "project_id" in parsed:
-        return parsed
+        return clean_service_account(parsed)
     st.error(f"No pude leer credenciales válidas desde `{path}`.")
     st.stop()
 
