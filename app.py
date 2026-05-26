@@ -20,6 +20,7 @@ import firebase_admin
 import streamlit as st
 from firebase_admin import credentials, firestore
 from cloudinary_uploader import upload_worker_file
+from login import is_authenticated, render_login, logout
 
 
 st.set_page_config(
@@ -73,16 +74,22 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
 .main .block-container {
     padding: 2.5rem 3rem 4rem !important;
     max-width: 1200px;
+    animation: fadeSlide 0.45s ease-out !important;
+}
+
+@keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .hero-banner {
     position: relative;
-    border: 1px solid var(--border);
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-    border-radius: 14px;
-    padding: 1.15rem 1.2rem;
+    border: 1px solid #cfd8e3;
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 52%, #eff6ff 100%);
+    border-radius: 16px;
+    padding: 1.2rem 1.35rem;
     margin-bottom: 1rem;
-    box-shadow: 0 10px 28px rgba(15,23,42,0.08);
+    box-shadow: 0 16px 34px rgba(15,23,42,0.12);
     overflow: hidden;
 }
 .hero-banner::before {
@@ -112,7 +119,7 @@ h1 {
     font-size: 1.5rem !important;
     letter-spacing: 0.03em !important;
     color: var(--text) !important;
-    border-bottom: 1px solid #111111;
+    border-bottom: 1px solid #0f172a;
     padding-bottom: 1rem;
     margin-bottom: 0.25rem !important;
 }
@@ -136,17 +143,28 @@ p, [data-testid="stText"], small, label {
 
 /* Métricas */
 [data-testid="stMetric"] {
-    background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%) !important;
     border: 1px solid #cbd5e1 !important;
-    border-top: 4px solid #111111 !important;
+    border-top: 4px solid #0f172a !important;
     border-radius: 12px !important;
     padding: 1.25rem 1.5rem !important;
-    box-shadow: 0 8px 22px rgba(15,23,42,0.09) !important;
+    box-shadow: 0 10px 24px rgba(15,23,42,0.10) !important;
     transition: transform 0.16s ease, box-shadow 0.16s ease !important;
+    position: relative !important;
 }
 [data-testid="stMetric"]:hover {
     transform: translateY(-3px) !important;
     box-shadow: 0 12px 28px rgba(15,23,42,0.14) !important;
+}
+[data-testid="stMetric"]::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #1d4ed8, #b91c1c);
+    opacity: 0.65;
 }
 [data-testid="stMetricLabel"] {
     font-family: var(--mono) !important;
@@ -165,6 +183,7 @@ p, [data-testid="stText"], small, label {
 [data-testid="stTabs"] [role="tablist"] {
     border-bottom: 1px solid var(--border) !important;
     gap: 0.4rem !important;
+    padding: 0.3rem 0 !important;
 }
 [data-testid="stTabs"] button {
     font-family: var(--mono) !important;
@@ -173,7 +192,7 @@ p, [data-testid="stText"], small, label {
     letter-spacing: 0.08em !important;
     color: #111111 !important;
     border: 1px solid transparent !important;
-    background: #f4f4f5 !important;
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
     border-radius: 999px !important;
     padding: 0.58rem 1.05rem !important;
 }
@@ -181,7 +200,7 @@ p, [data-testid="stText"], small, label {
     color: #ffffff !important;
     background: linear-gradient(90deg, #111111 0%, #1d4ed8 70%) !important;
     border-color: #111111 !important;
-    box-shadow: 0 8px 14px rgba(29,78,216,0.22) !important;
+    box-shadow: 0 10px 20px rgba(29,78,216,0.30) !important;
 }
 [data-testid="stTabsContent"] {
     padding-top: 1.5rem !important;
@@ -194,7 +213,7 @@ p, [data-testid="stText"], small, label {
 [data-testid="stDateInput"] input {
     background: #ffffff !important;
     border: 1px solid #cbd5e1 !important;
-    border-radius: 10px !important;
+    border-radius: 12px !important;
     color: var(--text) !important;
     font-family: var(--sans) !important;
     font-size: 0.875rem !important;
@@ -202,7 +221,7 @@ p, [data-testid="stText"], small, label {
 [data-testid="stTextInput"] input:focus,
 [data-testid="stSelectbox"] div[data-baseweb="select"] > div:focus-within {
     border-color: var(--accent) !important;
-    box-shadow: 0 0 0 3px rgba(37,99,235,0.12) !important;
+    box-shadow: 0 0 0 4px rgba(37,99,235,0.14) !important;
 }
 [data-testid="stTextInput"] label,
 [data-testid="stSelectbox"] label,
@@ -291,12 +310,25 @@ p, [data-testid="stText"], small, label {
 
 /* Form container */
 [data-testid="stForm"] {
-    background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%) !important;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
     border: 1px solid #d4d4d8 !important;
-    border-radius: 14px !important;
+    border-radius: 16px !important;
     padding: 1.5rem !important;
-    box-shadow: 0 10px 24px rgba(15,23,42,0.08) !important;
+    box-shadow: 0 14px 30px rgba(15,23,42,0.10) !important;
     backdrop-filter: blur(2px) !important;
+}
+
+/* Elegant micro accents */
+.stCaption code {
+    background: #e2e8f0 !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 999px !important;
+    padding: 0.08rem 0.45rem !important;
+}
+
+[data-testid="stAlert"] {
+    box-shadow: 0 8px 18px rgba(15,23,42,0.08) !important;
 }
 
 /* Divider */
@@ -972,6 +1004,12 @@ def admin_page():
     <hr style="margin: 0.85rem 0 1.5rem; border-color:#d1d5db;">
     """, unsafe_allow_html=True)
 
+    top_l, top_r = st.columns([5, 1])
+    with top_r:
+        if st.button("Cerrar sesión", use_container_width=True):
+            logout()
+            st.rerun()
+
     try:
         get_firestore_client()
     except Exception as exc:
@@ -996,6 +1034,9 @@ def admin_page():
 
 
 def main():
+    if not is_authenticated():
+        render_login()
+        return
     admin_page()
 
 
