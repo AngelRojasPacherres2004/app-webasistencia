@@ -1,8 +1,20 @@
-from pathlib import Path
+﻿from pathlib import Path
 from uuid import uuid4
 from datetime import date
 import json
-import tomllib
+import base64
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        import toml as _toml
+        class _TomlFallback:
+            @staticmethod
+            def loads(content):
+                return _toml.loads(content)
+        tomllib = _TomlFallback()
 
 import firebase_admin
 import streamlit as st
@@ -17,30 +29,42 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+BACKGROUND_IMAGE_PATH = Path("fondo.png")
+background_image_b64 = ""
+if BACKGROUND_IMAGE_PATH.exists():
+    background_image_b64 = base64.b64encode(BACKGROUND_IMAGE_PATH.read_bytes()).decode("utf-8")
+
 # ── Tema visual ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
 
 :root {
-    --bg:        #f5f6fa;
+    --bg:        #ffffff;
     --surface:   #ffffff;
-    --border:    #dde1ea;
-    --accent:    #2563eb;
-    --accent2:   #0ea86e;
-    --danger:    #dc2626;
-    --text:      #111827;
-    --muted:     #6b7280;
+    --surface-2: #f8fafc;
+    --border:    #d4d4d8;
+    --accent:    #1d4ed8;
+    --accent2:   #111111;
+    --danger:    #b91c1c;
+    --text:      #0b0b0b;
+    --muted:     #3f3f46;
     --mono:      'Space Mono', monospace;
     --sans:      'DM Sans', sans-serif;
 }
 
 /* Base */
-html, body, [data-testid="stAppViewContainer"] {
-    background: var(--bg) !important;
+html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .main {
+    background:
+        linear-gradient(rgba(255,255,255,0.70), rgba(255,255,255,0.70)),
+        url("data:image/png;base64,__BG_IMAGE__") center / cover no-repeat fixed,
+        radial-gradient(circle at 8% 8%, rgba(29,78,216,0.07), transparent 30%),
+        radial-gradient(circle at 92% 6%, rgba(185,28,28,0.06), transparent 26%),
+        linear-gradient(180deg, #ffffff 0%, #f8fafc 60%, #ffffff 100%) !important;
     color: var(--text) !important;
     font-family: var(--sans) !important;
 }
+[data-testid="stAppViewContainer"] > .main { background: transparent !important; }
 [data-testid="stHeader"] { background: transparent !important; }
 [data-testid="stToolbar"] { display: none; }
 [data-testid="stSidebar"] { background: var(--surface) !important; border-right: 1px solid var(--border); }
@@ -51,13 +75,44 @@ html, body, [data-testid="stAppViewContainer"] {
     max-width: 1200px;
 }
 
+.hero-banner {
+    position: relative;
+    border: 1px solid var(--border);
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    border-radius: 14px;
+    padding: 1.15rem 1.2rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 10px 28px rgba(15,23,42,0.08);
+    overflow: hidden;
+}
+.hero-banner::before {
+    content: "";
+    position: absolute;
+    width: 180px;
+    height: 180px;
+    right: -65px;
+    top: -85px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(29,78,216,0.16), transparent 70%);
+}
+.hero-banner::after {
+    content: "";
+    position: absolute;
+    width: 150px;
+    height: 150px;
+    left: -70px;
+    bottom: -90px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(185,28,28,0.13), transparent 72%);
+}
+
 /* Títulos */
 h1 {
     font-family: var(--mono) !important;
     font-size: 1.5rem !important;
     letter-spacing: 0.03em !important;
     color: var(--text) !important;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid #111111;
     padding-bottom: 1rem;
     margin-bottom: 0.25rem !important;
 }
@@ -81,12 +136,17 @@ p, [data-testid="stText"], small, label {
 
 /* Métricas */
 [data-testid="stMetric"] {
-    background: var(--surface) !important;
-    border: 1px solid var(--border) !important;
-    border-top: 3px solid var(--accent) !important;
-    border-radius: 6px !important;
+    background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+    border: 1px solid #cbd5e1 !important;
+    border-top: 4px solid #111111 !important;
+    border-radius: 12px !important;
     padding: 1.25rem 1.5rem !important;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06) !important;
+    box-shadow: 0 8px 22px rgba(15,23,42,0.09) !important;
+    transition: transform 0.16s ease, box-shadow 0.16s ease !important;
+}
+[data-testid="stMetric"]:hover {
+    transform: translateY(-3px) !important;
+    box-shadow: 0 12px 28px rgba(15,23,42,0.14) !important;
 }
 [data-testid="stMetricLabel"] {
     font-family: var(--mono) !important;
@@ -97,28 +157,31 @@ p, [data-testid="stText"], small, label {
 }
 [data-testid="stMetricValue"] {
     font-family: var(--mono) !important;
-    font-size: 2.2rem !important;
+    font-size: 2.45rem !important;
     color: var(--text) !important;
 }
 
 /* Tabs */
+[data-testid="stTabs"] [role="tablist"] {
+    border-bottom: 1px solid var(--border) !important;
+    gap: 0.4rem !important;
+}
 [data-testid="stTabs"] button {
     font-family: var(--mono) !important;
     font-size: 0.7rem !important;
     text-transform: uppercase !important;
     letter-spacing: 0.08em !important;
-    color: var(--muted) !important;
-    border: none !important;
-    background: transparent !important;
-    padding: 0.6rem 1rem !important;
+    color: #111111 !important;
+    border: 1px solid transparent !important;
+    background: #f4f4f5 !important;
+    border-radius: 999px !important;
+    padding: 0.58rem 1.05rem !important;
 }
 [data-testid="stTabs"] button[aria-selected="true"] {
-    color: var(--accent) !important;
-    border-bottom: 2px solid var(--accent) !important;
-}
-[data-testid="stTabs"] [role="tablist"] {
-    border-bottom: 1px solid var(--border) !important;
-    gap: 0.25rem !important;
+    color: #ffffff !important;
+    background: linear-gradient(90deg, #111111 0%, #1d4ed8 70%) !important;
+    border-color: #111111 !important;
+    box-shadow: 0 8px 14px rgba(29,78,216,0.22) !important;
 }
 [data-testid="stTabsContent"] {
     padding-top: 1.5rem !important;
@@ -129,9 +192,9 @@ p, [data-testid="stText"], small, label {
 [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
 [data-testid="stTimeInput"] input,
 [data-testid="stDateInput"] input {
-    background: #fff !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 5px !important;
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 10px !important;
     color: var(--text) !important;
     font-family: var(--sans) !important;
     font-size: 0.875rem !important;
@@ -157,23 +220,30 @@ p, [data-testid="stText"], small, label {
 /* Botón principal */
 [data-testid="stFormSubmitButton"] button,
 .stButton button {
-    background: var(--accent) !important;
-    color: #fff !important;
+    background: linear-gradient(90deg, #1d4ed8 0%, #1e40af 55%, #111111 100%) !important;
+    color: #ffffff !important;
     border: none !important;
-    border-radius: 5px !important;
+    border-radius: 10px !important;
     font-family: var(--mono) !important;
     font-size: 0.72rem !important;
     text-transform: uppercase !important;
     letter-spacing: 0.08em !important;
-    padding: 0.65rem 1.5rem !important;
+    padding: 0.72rem 1.5rem !important;
     transition: background 0.15s, box-shadow 0.15s, transform 0.1s !important;
-    box-shadow: 0 2px 6px rgba(37,99,235,0.25) !important;
+    box-shadow: 0 10px 20px rgba(29,78,216,0.25) !important;
+    position: relative !important;
+    overflow: hidden !important;
+}
+[data-testid="stFormSubmitButton"] button *,
+.stButton button * {
+    color: #ffffff !important;
+    fill: #ffffff !important;
 }
 [data-testid="stFormSubmitButton"] button:hover,
 .stButton button:hover {
-    background: #1d4ed8 !important;
-    transform: translateY(-1px) !important;
-    box-shadow: 0 4px 12px rgba(37,99,235,0.3) !important;
+    background: linear-gradient(90deg, #1e40af 0%, #1d4ed8 50%, #0b0b0b 100%) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 14px 26px rgba(29,78,216,0.32) !important;
 }
 [data-testid="stFormSubmitButton"] button:active,
 .stButton button:active {
@@ -182,10 +252,23 @@ p, [data-testid="stText"], small, label {
 
 /* Dataframe */
 [data-testid="stDataFrame"] {
-    border: 1px solid var(--border) !important;
-    border-radius: 6px !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 10px !important;
     overflow: hidden !important;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05) !important;
+    box-shadow: 0 6px 16px rgba(15,23,42,0.08) !important;
+    background: #ffffff !important;
+}
+[data-testid="stDataFrame"] * {
+    color: #111111 !important;
+}
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stDataFrame"] [role="columnheader"] {
+    background: #ffffff !important;
+    border-color: #e5e7eb !important;
+}
+[data-testid="stTable"] * {
+    color: #111111 !important;
+    background: #ffffff !important;
 }
 
 /* Alerts */
@@ -193,6 +276,7 @@ p, [data-testid="stText"], small, label {
     border-radius: 5px !important;
     font-family: var(--sans) !important;
     font-size: 0.85rem !important;
+    border-left: 3px solid var(--danger) !important;
 }
 
 /* Multiselect chips */
@@ -207,11 +291,12 @@ p, [data-testid="stText"], small, label {
 
 /* Form container */
 [data-testid="stForm"] {
-    background: var(--surface) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 8px !important;
+    background: linear-gradient(180deg, #ffffff 0%, #f9fafb 100%) !important;
+    border: 1px solid #d4d4d8 !important;
+    border-radius: 14px !important;
     padding: 1.5rem !important;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.05) !important;
+    box-shadow: 0 10px 24px rgba(15,23,42,0.08) !important;
+    backdrop-filter: blur(2px) !important;
 }
 
 /* Divider */
@@ -223,7 +308,7 @@ hr { border-color: var(--border) !important; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #b0b7c3; }
 </style>
-""", unsafe_allow_html=True)
+""".replace("__BG_IMAGE__", background_image_b64), unsafe_allow_html=True)
 
 
 # ── Constantes ─────────────────────────────────────────────────────────────────
@@ -862,20 +947,29 @@ def overview():
 def admin_page():
     # Encabezado
     st.markdown("""
-    <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.25rem;">
-        <div style="font-size:1.4rem; color:#2563eb;">⬡</div>
-        <div>
-            <div style="font-family:'Space Mono',monospace; font-size:1.35rem;
-                        letter-spacing:0.04em; color:#111827; line-height:1;">
-                Panel de Administración
+    <div class="hero-banner">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+            <div style="display:flex; align-items:center; gap:0.8rem;">
+                <div style="font-size:1.45rem; color:#1d4ed8; line-height:1;">⬡</div>
+                <div>
+                    <div style="font-family:'Space Mono',monospace; font-size:1.35rem;
+                                letter-spacing:0.04em; color:#0b0b0b; line-height:1;">
+                        Panel de Administración
+                    </div>
+                    <div style="font-size:0.79rem; color:#3f3f46; font-family:'DM Sans',sans-serif;
+                                margin-top:0.24rem;">
+                        Sistema de Asistencia · Firebase Firestore
+                    </div>
+                </div>
             </div>
-            <div style="font-size:0.78rem; color:#6b7280; font-family:'DM Sans',sans-serif;
-                        margin-top:0.2rem;">
-                Sistema de Asistencia · Firebase Firestore
+            <div style="font-family:'Space Mono',monospace;font-size:0.64rem;letter-spacing:0.08em;
+                        text-transform:uppercase;padding:0.38rem 0.7rem;border-radius:999px;
+                        color:#ffffff;background:linear-gradient(90deg,#111111,#b91c1c);">
+                control center
             </div>
         </div>
     </div>
-    <hr style="margin: 0.75rem 0 1.5rem; border-color:#dde1ea;">
+    <hr style="margin: 0.85rem 0 1.5rem; border-color:#d1d5db;">
     """, unsafe_allow_html=True)
 
     try:

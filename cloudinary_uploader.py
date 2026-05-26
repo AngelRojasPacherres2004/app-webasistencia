@@ -1,7 +1,18 @@
-from io import BytesIO
+﻿from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
-import tomllib
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        import toml as _toml
+        class _TomlFallback:
+            @staticmethod
+            def loads(content):
+                return _toml.loads(content)
+        tomllib = _TomlFallback()
 
 import cloudinary
 import cloudinary.uploader
@@ -122,3 +133,4 @@ def upload_worker_file(uploaded_file, worker_id):
         "resource_type": result.get("resource_type", ""),
         "name": uploaded_file.name,
     }
+
