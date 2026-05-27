@@ -1,6 +1,7 @@
 ﻿from pathlib import Path
 from uuid import uuid4
 from datetime import date
+from types import SimpleNamespace
 import json
 import base64
 try:
@@ -21,13 +22,17 @@ import streamlit as st
 from firebase_admin import credentials, firestore
 from cloudinary_uploader import upload_worker_file
 from login import is_authenticated, render_login, logout
+from sections.asistencias import render_asistencias
+from sections.overview import render_overview
+from sections.tiendas import render_tiendas
+from sections.trabajadores import render_trabajadores
 
 
 st.set_page_config(
     page_title="Admin · Asistencia",
     page_icon="⬡",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 BACKGROUND_IMAGE_PATH = Path("fondo.png")
@@ -41,39 +46,64 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
 
 :root {
-    --bg:        #ffffff;
-    --surface:   #ffffff;
-    --surface-2: #f8fafc;
-    --border:    #d4d4d8;
-    --accent:    #1d4ed8;
-    --accent2:   #111111;
-    --danger:    #b91c1c;
-    --text:      #0b0b0b;
-    --muted:     #3f3f46;
+    --primary:   #ffffff;
+    --secondary: #eaf4ff;
+    --tertiary:  #e53935;
+    --bg:        var(--primary);
+    --surface:   var(--primary);
+    --surface-2: var(--secondary);
+    --border:    #cfe3f7;
+    --accent:    #78bdf2;
+    --accent2:   #d8efff;
+    --danger:    var(--tertiary);
+    --text:      #1f2a37;
+    --muted:     #5f7182;
     --mono:      'Space Mono', monospace;
     --sans:      'DM Sans', sans-serif;
 }
 
 /* Base */
 html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .main {
-    background:
-        linear-gradient(rgba(255,255,255,0.70), rgba(255,255,255,0.70)),
-        url("data:image/png;base64,__BG_IMAGE__") center / cover no-repeat fixed,
-        radial-gradient(circle at 8% 8%, rgba(29,78,216,0.07), transparent 30%),
-        radial-gradient(circle at 92% 6%, rgba(185,28,28,0.06), transparent 26%),
-        linear-gradient(180deg, #ffffff 0%, #f8fafc 60%, #ffffff 100%) !important;
+    background: linear-gradient(180deg, var(--primary) 0%, var(--secondary) 100%) !important;
     color: var(--text) !important;
     font-family: var(--sans) !important;
 }
 [data-testid="stAppViewContainer"] > .main { background: transparent !important; }
-[data-testid="stHeader"] { background: transparent !important; }
+[data-testid="stHeader"] { background: rgba(255,255,255,0.88) !important; }
 [data-testid="stToolbar"] { display: none; }
-[data-testid="stSidebar"] { background: var(--surface) !important; border-right: 1px solid var(--border); }
+[data-testid="stSidebar"] {
+    background: var(--primary) !important;
+    border-right: 1px solid var(--border);
+    box-shadow: 8px 0 30px rgba(120,189,242,0.12);
+}
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: 1.25rem;
+}
+[data-testid="stSidebar"] [role="radiogroup"] {
+    gap: 0.45rem;
+}
+[data-testid="stSidebar"] label {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--primary);
+    padding: 0.72rem 0.8rem;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+[data-testid="stSidebar"] label:hover {
+    background: var(--secondary);
+    border-color: var(--accent);
+    transform: translateX(2px);
+}
+[data-testid="stSidebar"] label:has(input:checked) {
+    background: var(--secondary);
+    border-color: var(--accent);
+    box-shadow: inset 4px 0 0 var(--tertiary);
+}
 
 /* Main container */
 .main .block-container {
-    padding: 2.5rem 3rem 4rem !important;
-    max-width: 1200px;
+    padding: 2rem 2.2rem 4rem !important;
+    max-width: 1180px;
     animation: fadeSlide 0.45s ease-out !important;
 }
 
@@ -84,33 +114,32 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
 
 .hero-banner {
     position: relative;
-    border: 1px solid #cfd8e3;
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 52%, #eff6ff 100%);
-    border-radius: 16px;
+    border: 1px solid var(--border);
+    border-left: 5px solid var(--tertiary);
+    background: var(--primary);
+    border-radius: 8px;
     padding: 1.2rem 1.35rem;
     margin-bottom: 1rem;
-    box-shadow: 0 16px 34px rgba(15,23,42,0.12);
+    box-shadow: 0 14px 32px rgba(120,189,242,0.16);
     overflow: hidden;
 }
 .hero-banner::before {
     content: "";
     position: absolute;
-    width: 180px;
-    height: 180px;
-    right: -65px;
-    top: -85px;
-    border-radius: 999px;
-    background: radial-gradient(circle, rgba(29,78,216,0.16), transparent 70%);
+    width: 35%;
+    height: 100%;
+    right: 0;
+    top: 0;
+    background: linear-gradient(90deg, rgba(234,244,255,0), var(--secondary));
 }
 .hero-banner::after {
     content: "";
     position: absolute;
-    width: 150px;
-    height: 150px;
-    left: -70px;
-    bottom: -90px;
-    border-radius: 999px;
-    background: radial-gradient(circle, rgba(185,28,28,0.13), transparent 72%);
+    width: 100%;
+    height: 3px;
+    left: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, var(--accent), var(--tertiary));
 }
 
 /* Títulos */
@@ -119,7 +148,7 @@ h1 {
     font-size: 1.5rem !important;
     letter-spacing: 0.03em !important;
     color: var(--text) !important;
-    border-bottom: 1px solid #0f172a;
+    border-bottom: 1px solid var(--border);
     padding-bottom: 1rem;
     margin-bottom: 0.25rem !important;
 }
@@ -143,18 +172,18 @@ p, [data-testid="stText"], small, label {
 
 /* Métricas */
 [data-testid="stMetric"] {
-    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%) !important;
-    border: 1px solid #cbd5e1 !important;
-    border-top: 4px solid #0f172a !important;
-    border-radius: 12px !important;
+    background: var(--primary) !important;
+    border: 1px solid var(--border) !important;
+    border-top: 4px solid var(--accent) !important;
+    border-radius: 8px !important;
     padding: 1.25rem 1.5rem !important;
-    box-shadow: 0 10px 24px rgba(15,23,42,0.10) !important;
+    box-shadow: 0 10px 24px rgba(120,189,242,0.14) !important;
     transition: transform 0.16s ease, box-shadow 0.16s ease !important;
     position: relative !important;
 }
 [data-testid="stMetric"]:hover {
     transform: translateY(-3px) !important;
-    box-shadow: 0 12px 28px rgba(15,23,42,0.14) !important;
+    box-shadow: 0 12px 28px rgba(120,189,242,0.20) !important;
 }
 [data-testid="stMetric"]::after {
     content: "";
@@ -163,7 +192,7 @@ p, [data-testid="stText"], small, label {
     right: 0;
     bottom: 0;
     height: 2px;
-    background: linear-gradient(90deg, #1d4ed8, #b91c1c);
+    background: linear-gradient(90deg, var(--accent), var(--tertiary));
     opacity: 0.65;
 }
 [data-testid="stMetricLabel"] {
@@ -190,17 +219,17 @@ p, [data-testid="stText"], small, label {
     font-size: 0.7rem !important;
     text-transform: uppercase !important;
     letter-spacing: 0.08em !important;
-    color: #111111 !important;
+    color: var(--text) !important;
     border: 1px solid transparent !important;
-    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
-    border-radius: 999px !important;
+    background: var(--secondary) !important;
+    border-radius: 8px !important;
     padding: 0.58rem 1.05rem !important;
 }
 [data-testid="stTabs"] button[aria-selected="true"] {
     color: #ffffff !important;
-    background: linear-gradient(90deg, #111111 0%, #1d4ed8 70%) !important;
-    border-color: #111111 !important;
-    box-shadow: 0 10px 20px rgba(29,78,216,0.30) !important;
+    background: var(--tertiary) !important;
+    border-color: var(--tertiary) !important;
+    box-shadow: 0 10px 20px rgba(229,57,53,0.20) !important;
 }
 [data-testid="stTabsContent"] {
     padding-top: 1.5rem !important;
@@ -212,8 +241,8 @@ p, [data-testid="stText"], small, label {
 [data-testid="stTimeInput"] input,
 [data-testid="stDateInput"] input {
     background: #ffffff !important;
-    border: 1px solid #cbd5e1 !important;
-    border-radius: 12px !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
     color: var(--text) !important;
     font-family: var(--sans) !important;
     font-size: 0.875rem !important;
@@ -221,7 +250,7 @@ p, [data-testid="stText"], small, label {
 [data-testid="stTextInput"] input:focus,
 [data-testid="stSelectbox"] div[data-baseweb="select"] > div:focus-within {
     border-color: var(--accent) !important;
-    box-shadow: 0 0 0 4px rgba(37,99,235,0.14) !important;
+    box-shadow: 0 0 0 4px rgba(120,189,242,0.22) !important;
 }
 [data-testid="stTextInput"] label,
 [data-testid="stSelectbox"] label,
@@ -239,17 +268,17 @@ p, [data-testid="stText"], small, label {
 /* Botón principal */
 [data-testid="stFormSubmitButton"] button,
 .stButton button {
-    background: linear-gradient(90deg, #1d4ed8 0%, #1e40af 55%, #111111 100%) !important;
+    background: var(--tertiary) !important;
     color: #ffffff !important;
     border: none !important;
-    border-radius: 10px !important;
+    border-radius: 8px !important;
     font-family: var(--mono) !important;
     font-size: 0.72rem !important;
     text-transform: uppercase !important;
     letter-spacing: 0.08em !important;
     padding: 0.72rem 1.5rem !important;
     transition: background 0.15s, box-shadow 0.15s, transform 0.1s !important;
-    box-shadow: 0 10px 20px rgba(29,78,216,0.25) !important;
+    box-shadow: 0 10px 20px rgba(229,57,53,0.18) !important;
     position: relative !important;
     overflow: hidden !important;
 }
@@ -260,9 +289,9 @@ p, [data-testid="stText"], small, label {
 }
 [data-testid="stFormSubmitButton"] button:hover,
 .stButton button:hover {
-    background: linear-gradient(90deg, #1e40af 0%, #1d4ed8 50%, #0b0b0b 100%) !important;
+    background: #c92f2b !important;
     transform: translateY(-2px) !important;
-    box-shadow: 0 14px 26px rgba(29,78,216,0.32) !important;
+    box-shadow: 0 14px 26px rgba(229,57,53,0.24) !important;
 }
 [data-testid="stFormSubmitButton"] button:active,
 .stButton button:active {
@@ -271,14 +300,14 @@ p, [data-testid="stText"], small, label {
 
 /* Dataframe */
 [data-testid="stDataFrame"] {
-    border: 1px solid #cbd5e1 !important;
-    border-radius: 10px !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
     overflow: hidden !important;
-    box-shadow: 0 6px 16px rgba(15,23,42,0.08) !important;
+    box-shadow: 0 6px 16px rgba(120,189,242,0.12) !important;
     background: #ffffff !important;
 }
 [data-testid="stDataFrame"] * {
-    color: #111111 !important;
+    color: var(--text) !important;
 }
 [data-testid="stDataFrame"] [role="gridcell"],
 [data-testid="stDataFrame"] [role="columnheader"] {
@@ -286,7 +315,7 @@ p, [data-testid="stText"], small, label {
     border-color: #e5e7eb !important;
 }
 [data-testid="stTable"] * {
-    color: #111111 !important;
+    color: var(--text) !important;
     background: #ffffff !important;
 }
 
@@ -300,9 +329,9 @@ p, [data-testid="stText"], small, label {
 
 /* Multiselect chips */
 [data-testid="stMultiSelect"] span[data-baseweb="tag"] {
-    background: rgba(37,99,235,0.1) !important;
-    border: 1px solid rgba(37,99,235,0.25) !important;
-    border-radius: 3px !important;
+    background: var(--secondary) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
     color: var(--accent) !important;
     font-family: var(--mono) !important;
     font-size: 0.68rem !important;
@@ -310,25 +339,25 @@ p, [data-testid="stText"], small, label {
 
 /* Form container */
 [data-testid="stForm"] {
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
-    border: 1px solid #d4d4d8 !important;
-    border-radius: 16px !important;
+    background: var(--primary) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
     padding: 1.5rem !important;
-    box-shadow: 0 14px 30px rgba(15,23,42,0.10) !important;
+    box-shadow: 0 14px 30px rgba(120,189,242,0.14) !important;
     backdrop-filter: blur(2px) !important;
 }
 
 /* Elegant micro accents */
 .stCaption code {
-    background: #e2e8f0 !important;
-    color: #0f172a !important;
-    border: 1px solid #cbd5e1 !important;
+    background: var(--secondary) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border) !important;
     border-radius: 999px !important;
     padding: 0.08rem 0.45rem !important;
 }
 
 [data-testid="stAlert"] {
-    box-shadow: 0 8px 18px rgba(15,23,42,0.08) !important;
+    box-shadow: 0 8px 18px rgba(120,189,242,0.12) !important;
 }
 
 /* Divider */
@@ -420,6 +449,135 @@ def add_months(month_value, delta):
 
 def format_month(month_value):
     return f"{MONTH_NAMES[month_value.month - 1]} {month_value.year}"
+
+
+def first_present(data, *keys):
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def map_value(data, map_key, value_key):
+    value = data.get(map_key)
+    if isinstance(value, dict):
+        return value.get(value_key) or ""
+    return ""
+
+
+def path_value_after(path_parts, collection_names):
+    normalized_names = {name.lower() for name in collection_names}
+    for index, part in enumerate(path_parts[:-1]):
+        if part.lower() in normalized_names:
+            return path_parts[index + 1]
+    return ""
+
+
+def build_attendance_row(doc, data):
+    path_parts = doc.reference.path.split("/")
+    fecha = (
+        first_present(data, "fecha", "date", "dia", "fecha_dia")
+        or path_value_after(path_parts, ("dias", "dia"))
+        or doc.id
+    )
+    parsed_date = parse_iso_date(fecha)
+    id_trabajador = first_present(
+        data,
+        "id_trabajador",
+        "trabajador_id",
+        "idTrabajador",
+        "worker_id",
+    ) or path_value_after(path_parts, ("trabajadores", "trabajador"))
+    id_tienda = first_present(
+        data,
+        "id_tienda",
+        "tienda_id",
+        "idTienda",
+        "store_id",
+    ) or path_value_after(path_parts, ("tiendas", "tienda"))
+    id_sede = first_present(
+        data,
+        "id_sede",
+        "sede_id",
+        "idSede",
+    ) or path_value_after(path_parts, ("asistencias", "sedes", "sede"))
+
+    entrada = data.get("entrada") if isinstance(data.get("entrada"), dict) else {}
+    salida = data.get("salida") if isinstance(data.get("salida"), dict) else {}
+    horario = data.get("horario") if isinstance(data.get("horario"), dict) else {}
+
+    return {
+        "doc_id": doc.id,
+        "ruta": doc.reference.path,
+        "fecha": fecha,
+        "fecha_orden": parsed_date.isoformat() if parsed_date else "",
+        "nombre_tienda": (
+            first_present(data, "nombre_tienda", "tienda", "store_name")
+            or entrada.get("nombre_tienda")
+            or salida.get("nombre_tienda")
+            or id_tienda
+        ),
+        "id_tienda": id_tienda or entrada.get("id_tienda") or salida.get("id_tienda"),
+        "id_trabajador": id_trabajador,
+        "nombre_trabajador": first_present(
+            data,
+            "nombre_trabajador",
+            "trabajador",
+            "nombre",
+            "worker_name",
+        ),
+        "dni": first_present(data, "dni", "documento"),
+        "hora_inicio": (
+            first_present(data, "hora_inicio", "horaEntrada")
+            or entrada.get("hora")
+            or horario.get("hora_inicio")
+        ),
+        "inicio_receso": first_present(data, "inicio_receso", "inicioReceso"),
+        "final_receso": first_present(data, "final_receso", "finalReceso"),
+        "hora_final": (
+            first_present(data, "hora_final", "hora_finalhas", "horaSalida")
+            or salida.get("hora")
+            or horario.get("hora_final")
+        ),
+        "ultima_marca": (
+            first_present(data, "ultima_marca", "ultimaMarca", "estado")
+            or salida.get("estado")
+            or map_value(data, "refrigerio_fin", "estado")
+            or map_value(data, "refrigerio_inicio", "estado")
+            or entrada.get("estado")
+        ),
+        "id_sede": id_sede,
+        "nombre_sede": (
+            first_present(data, "nombre_sede", "sede")
+            or entrada.get("nombre_sede")
+            or salida.get("nombre_sede")
+            or id_sede
+        ),
+        "horario_programado": (
+            f"{horario.get('hora_inicio', '')} - {horario.get('hora_final', '')}"
+            if horario else ""
+        ),
+    }
+
+
+def stream_attendance_sources(db):
+    seen_paths = set()
+
+    for doc in db.collection(ATTENDANCE_COLLECTION).limit(250).stream():
+        seen_paths.add(doc.reference.path)
+        yield doc
+
+    for collection_name in ("dias", "asistencias", "asistencia"):
+        try:
+            docs = db.collection_group(collection_name).stream()
+            for doc in docs:
+                if doc.reference.path in seen_paths:
+                    continue
+                seen_paths.add(doc.reference.path)
+                yield doc
+        except Exception:
+            continue
 
 
 @st.cache_resource(show_spinner=False)
@@ -560,49 +718,39 @@ def get_trabajadores():
 @st.cache_data(ttl=10, show_spinner=False)
 def get_asistencias():
     db = get_firestore_client()
-    docs = db.collection(ATTENDANCE_COLLECTION).limit(30).stream()
     asistencias = []
-    for doc in docs:
-        data = doc.to_dict()
-        asistencias.append({
-            "doc_id": doc.id,
-            "fecha": data.get("fecha", ""),
-            "nombre_tienda": data.get("nombre_tienda", ""),
-            "id_trabajador": data.get("id_trabajador", ""),
-            "dni": data.get("dni", ""),
-            "ultima_marca": data.get("ultima_marca", ""),
-        })
-    return asistencias
+
+    for doc in stream_attendance_sources(db):
+        asistencias.append(build_attendance_row(doc, doc.to_dict() or {}))
+
+    unique_rows = {item["ruta"]: item for item in asistencias}
+    return sorted(
+        unique_rows.values(),
+        key=lambda item: item["fecha_orden"] or item["fecha"],
+        reverse=True,
+    )
 
 
 @st.cache_data(ttl=10, show_spinner=False)
 def get_asistencias_trabajador(id_trabajador):
     db = get_firestore_client()
+    asistencias = []
+
     docs = (
         db.collection(ATTENDANCE_COLLECTION)
         .where("id_trabajador", "==", id_trabajador)
         .stream()
     )
-    asistencias = []
     for doc in docs:
-        data = doc.to_dict()
-        parsed_date = parse_iso_date(data.get("fecha"))
-        asistencias.append({
-            "doc_id": doc.id,
-            "fecha": data.get("fecha", ""),
-            "fecha_orden": parsed_date.isoformat() if parsed_date else "",
-            "nombre_tienda": data.get("nombre_tienda", ""),
-            "id_tienda": data.get("id_tienda", ""),
-            "hora_inicio": data.get("hora_inicio", ""),
-            "inicio_receso": data.get("inicio_receso", ""),
-            "final_receso": data.get("final_receso", ""),
-            "hora_final": data.get("hora_final") or data.get("hora_finalhas", ""),
-            "ultima_marca": data.get("ultima_marca", ""),
-            "id_sede": data.get("id_sede", ""),
-            "nombre_sede": data.get("nombre_sede", ""),
-            "dni": data.get("dni", ""),
-        })
-    return sorted(asistencias, key=lambda x: x["fecha_orden"], reverse=True)
+        asistencias.append(build_attendance_row(doc, doc.to_dict() or {}))
+
+    for doc in stream_attendance_sources(db):
+        row = build_attendance_row(doc, doc.to_dict() or {})
+        if str(row["id_trabajador"]) == str(id_trabajador):
+            asistencias.append(row)
+
+    unique_rows = {item["ruta"]: item for item in asistencias}
+    return sorted(unique_rows.values(), key=lambda x: x["fecha_orden"], reverse=True)
 
 
 # ── Componentes UI ─────────────────────────────────────────────────────────────
@@ -610,17 +758,17 @@ def section_header(title, subtitle=None):
     """Encabezado de sección con línea decorativa."""
     st.markdown(f"""
     <div style="margin: 0.5rem 0 1.5rem; padding-left: 0.75rem;
-                border-left: 3px solid #2563eb;">
+                border-left: 3px solid var(--tertiary);">
         <div style="font-family:'Space Mono',monospace; font-size:0.78rem;
-                    text-transform:uppercase; letter-spacing:0.1em; color:#2563eb;
+                    text-transform:uppercase; letter-spacing:0.1em; color:var(--text);
                     margin-bottom:0.2rem;">{title}</div>
-        {'<div style="font-size:0.82rem; color:#6b7280; font-family:DM Sans,sans-serif;">'+subtitle+'</div>' if subtitle else ''}
+        {'<div style="font-size:0.82rem; color:var(--muted); font-family:DM Sans,sans-serif;">'+subtitle+'</div>' if subtitle else ''}
     </div>
     """, unsafe_allow_html=True)
 
 
-def badge(text, color="#5865f2"):
-    return f'<span style="background:rgba(88,101,242,0.15);color:{color};border:1px solid rgba(88,101,242,0.3);border-radius:3px;padding:2px 8px;font-family:Space Mono,monospace;font-size:0.65rem;letter-spacing:0.06em;">{text}</span>'
+def badge(text, color="var(--text)"):
+    return f'<span style="background:var(--secondary);color:{color};border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-family:Space Mono,monospace;font-size:0.65rem;letter-spacing:0.06em;">{text}</span>'
 
 
 def build_schedule_inputs(selected_days):
@@ -629,9 +777,9 @@ def build_schedule_inputs(selected_days):
 
     st.markdown("""
     <div style="font-family:'Space Mono',monospace; font-size:0.68rem;
-                text-transform:uppercase; letter-spacing:0.08em; color:#6b7280;
+                text-transform:uppercase; letter-spacing:0.08em; color:var(--muted);
                 margin: 1.25rem 0 0.75rem; padding: 0.5rem 0;
-                border-top: 1px solid #dde1ea; border-bottom: 1px solid #dde1ea;">
+                border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
         ⬡ &nbsp;Horario por día
     </div>
     """, unsafe_allow_html=True)
@@ -639,11 +787,11 @@ def build_schedule_inputs(selected_days):
     schedule = {}
     header = st.columns([1.2, 1, 1, 1, 1])
     for col, label in zip(header, ["Día", "Entrada", "Ini. receso", "Fin receso", "Salida"]):
-        col.markdown(f'<span style="font-family:Space Mono,monospace;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.07em;color:#6b7280;">{label}</span>', unsafe_allow_html=True)
+        col.markdown(f'<span style="font-family:Space Mono,monospace;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);">{label}</span>', unsafe_allow_html=True)
 
     for day in selected_days:
         cols = st.columns([1.2, 1, 1, 1, 1])
-        cols[0].markdown(f'<span style="font-family:Space Mono,monospace;font-size:0.78rem;color:#111827;">{day.capitalize()}</span>', unsafe_allow_html=True)
+        cols[0].markdown(f'<span style="font-family:Space Mono,monospace;font-size:0.78rem;color:var(--text);">{day.capitalize()}</span>', unsafe_allow_html=True)
         schedule[day] = {
             "hora_inicio":    format_time(cols[1].time_input("Hora inicio",    key=f"{day}_hora_inicio",    label_visibility="collapsed")),
             "inicio_receso":  format_time(cols[2].time_input("Inicio receso",  key=f"{day}_inicio_receso",  label_visibility="collapsed")),
@@ -975,40 +1123,86 @@ def overview():
             st.info("Todavía no hay asistencias registradas.")
 
 
+def build_section_context():
+    return SimpleNamespace(
+        ATTENDANCE_COLLECTION=ATTENDANCE_COLLECTION,
+        QR_ACTIVE_COLLECTION=QR_ACTIVE_COLLECTION,
+        STORE_COLLECTION=STORE_COLLECTION,
+        WEEK_DAYS=WEEK_DAYS,
+        WORKER_COLLECTION=WORKER_COLLECTION,
+        build_schedule_inputs=build_schedule_inputs,
+        create_document=create_document,
+        create_store_with_qr=create_store_with_qr,
+        document_exists=document_exists,
+        firestore=firestore,
+        format_time=format_time,
+        get_asistencias=get_asistencias,
+        get_tiendas=get_tiendas,
+        get_trabajadores=get_trabajadores,
+        normalize_doc_id=normalize_doc_id,
+        normalize_email=normalize_email,
+        required_missing=required_missing,
+        section_header=section_header,
+        upload_worker_file=upload_worker_file,
+        worker_attendance_dialog=worker_attendance_dialog,
+    )
+
+
 # ── Página principal ───────────────────────────────────────────────────────────
 def admin_page():
-    # Encabezado
+    pages = {
+        "Resumen": render_overview,
+        "Tiendas": render_tiendas,
+        "Trabajadores": render_trabajadores,
+        "Asistencias": render_asistencias,
+    }
+
+    with st.sidebar:
+        st.markdown("""
+        <div style="padding:0.35rem 0 1rem;">
+            <div style="font-family:'Space Mono',monospace;font-size:1.05rem;color:#1f2a37;">
+                Admin Asistencia
+            </div>
+            <div style="font-size:0.78rem;color:#5f7182;margin-top:0.2rem;">
+                Panel de RRHH
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        current_page = st.radio(
+            "Sección",
+            options=list(pages.keys()),
+            label_visibility="collapsed",
+        )
+        st.markdown('<div style="height:1rem"></div>', unsafe_allow_html=True)
+        if st.button("Cerrar sesión", use_container_width=True):
+            logout()
+            st.rerun()
+
     st.markdown("""
     <div class="hero-banner">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
             <div style="display:flex; align-items:center; gap:0.8rem;">
-                <div style="font-size:1.45rem; color:#1d4ed8; line-height:1;">⬡</div>
+                <div style="font-size:1.45rem; color:#78bdf2; line-height:1;">⬡</div>
                 <div>
                     <div style="font-family:'Space Mono',monospace; font-size:1.35rem;
-                                letter-spacing:0.04em; color:#0b0b0b; line-height:1;">
+                                letter-spacing:0.04em; color:#1f2a37; line-height:1;">
                         Panel de Administración
                     </div>
-                    <div style="font-size:0.79rem; color:#3f3f46; font-family:'DM Sans',sans-serif;
+                    <div style="font-size:0.79rem; color:#5f7182; font-family:'DM Sans',sans-serif;
                                 margin-top:0.24rem;">
                         Sistema de Asistencia · Firebase Firestore
                     </div>
                 </div>
             </div>
             <div style="font-family:'Space Mono',monospace;font-size:0.64rem;letter-spacing:0.08em;
-                        text-transform:uppercase;padding:0.38rem 0.7rem;border-radius:999px;
-                        color:#ffffff;background:linear-gradient(90deg,#111111,#b91c1c);">
-                control center
+                        text-transform:uppercase;padding:0.38rem 0.7rem;border-radius:8px;
+                        color:#ffffff;background:#e53935;">
+                {current_page}
             </div>
         </div>
     </div>
-    <hr style="margin: 0.85rem 0 1.5rem; border-color:#d1d5db;">
-    """, unsafe_allow_html=True)
-
-    top_l, top_r = st.columns([5, 1])
-    with top_r:
-        if st.button("Cerrar sesión", use_container_width=True):
-            logout()
-            st.rerun()
+    <hr style="margin: 0.85rem 0 1.5rem; border-color:#cfe3f7;">
+    """.replace("{current_page}", current_page), unsafe_allow_html=True)
 
     try:
         get_firestore_client()
@@ -1016,21 +1210,7 @@ def admin_page():
         st.error(f"No se pudo conectar con Firebase: {exc}")
         st.stop()
 
-    tab_overview, tab_store, tab_worker, tab_attendance = st.tabs([
-        "⬡  Resumen",
-        "⊕  Tienda / Sede",
-        "⊕  Trabajador",
-        "⊕  Asistencia",
-    ])
-
-    with tab_overview:
-        overview()
-    with tab_store:
-        tienda_form()
-    with tab_worker:
-        trabajador_form()
-    with tab_attendance:
-        asistencia_form()
+    pages[current_page](build_section_context())
 
 
 def main():
