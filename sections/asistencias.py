@@ -149,6 +149,31 @@ def _parse_date(value):
         return None
 
 
+def _first_present(data, *keys):
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def _path_value_after(path_parts, collection_names):
+    normalized_names = {name.lower() for name in collection_names}
+    for index, part in enumerate(path_parts[:-1]):
+        if part.lower() in normalized_names:
+            return path_parts[index + 1]
+    return ""
+
+
+def _normalize_schedule_date(value, fallback=""):
+    parsed = _parse_date(value)
+    if parsed:
+        return parsed.isoformat()
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return fallback
+
+
 def _week_start(d):
     return d - timedelta(days=d.weekday())
 
@@ -177,6 +202,20 @@ def _get_db():
             Path(".streamlit/firebase-service-account.json"),
         )
 
+        def _extract_json_prefix(raw):
+            if not raw.startswith("{"):
+                return None
+            lines = raw.splitlines()
+            prefix_lines = []
+            for line in lines:
+                if line.lstrip().startswith("["):
+                    break
+                prefix_lines.append(line)
+            prefix = "\n".join(prefix_lines).strip()
+            if prefix.startswith("{"):
+                return prefix
+            return None
+
         def _load_sa():
             try:
                 if "firebase_service_account" in st.secrets:
@@ -186,11 +225,28 @@ def _get_db():
             for p in SECRET_PATHS:
                 if p.exists():
                     raw = p.read_text("utf-8").strip()
-                    if raw.startswith("{"):
-                        return json.loads(raw)
-                    parsed = tomllib.loads(raw)
-                    if "firebase_service_account" in parsed:
-                        return dict(parsed["firebase_service_account"])
+                    json_prefix = _extract_json_prefix(raw)
+                    if json_prefix:
+                        try:
+                            parsed = json.loads(json_prefix)
+                            if not isinstance(parsed, dict):
+                                raise ValueError("El archivo no contiene un objeto JSON válido")
+                            if "firebase_service_account" in parsed:
+                                return dict(parsed["firebase_service_account"])
+                            if "type" in parsed and "project_id" in parsed:
+                                return parsed
+                        except json.JSONDecodeError:
+                            pass
+                    try:
+                        parsed = tomllib.loads(raw)
+                        if "firebase_service_account" in parsed:
+                            return dict(parsed["firebase_service_account"])
+                        if "type" in parsed and "project_id" in parsed:
+                            return dict(parsed)
+                    except json.JSONDecodeError as exc:
+                        raise RuntimeError(f"Credenciales inválidas en {p}: {exc}") from exc
+                    except tomllib.TOMLDecodeError as exc:
+                        raise RuntimeError(f"Credenciales inválidas en {p}: {exc}") from exc
             st.error("No se encontraron credenciales de Firebase.")
             st.stop()
 
@@ -208,6 +264,8 @@ def _get_asistencias_full():
     rows = []
     for doc in docs:
         d = doc.to_dict()
+        entrada = d.get("entrada") if isinstance(d.get("entrada"), dict) else {}
+        salida = d.get("salida") if isinstance(d.get("salida"), dict) else {}
         rows.append({
             "doc_id":            doc.id,
             "fecha":             d.get("fecha", ""),
@@ -218,13 +276,63 @@ def _get_asistencias_full():
             "nombre_sede":       d.get("nombre_sede", ""),
             "id_tienda":         d.get("id_tienda", ""),
             "id_sede":           d.get("id_sede", ""),
-            "hora_inicio":       d.get("hora_inicio", ""),
+            "hora_inicio":       d.get("hora_inicio") or entrada.get("hora") or "",
             "inicio_receso":     d.get("inicio_receso", ""),
             "final_receso":      d.get("final_receso", ""),
             # el campo puede llamarse hora_final o hora_finalhas según el doc
-            "hora_final":        d.get("hora_final") or d.get("hora_finalhas", ""),
+            "hora_final":        d.get("hora_final") or d.get("hora_finalhas") or salida.get("hora") or "",
             "ultima_marca":      d.get("ultima_marca", ""),
+            "entrada":           entrada,
+            "salida":            salida,
         })
+    return rows
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_dias_schedule():
+    db = _get_db()
+    rows = []
+    seen_paths = set()
+
+    for doc in db.collection_group("dias").stream():
+        path = doc.reference.path
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+
+        data = doc.to_dict() or {}
+        entrada = data.get("entrada") if isinstance(data.get("entrada"), dict) else {}
+        salida = data.get("salida") if isinstance(data.get("salida"), dict) else {}
+
+        path_parts = path.split("/")
+        raw_fecha = _first_present(
+            data,
+            "fecha",
+            "date",
+            "dia",
+            "fecha_dia",
+        ) or doc.id
+
+        id_trabajador = _first_present(
+            data,
+            "id_trabajador",
+            "trabajador_id",
+            "idTrabajador",
+            "worker_id",
+        ) or _path_value_after(path_parts, ("trabajadores", "trabajador"))
+
+        rows.append({
+            "doc_id": doc.id,
+            "fecha": raw_fecha,
+            "fecha_dt": _parse_date(raw_fecha),
+            "id_trabajador": str(id_trabajador).strip(),
+            "id_sede": _first_present(data, "id_sede", "sede_id", "idSede"),
+            "entrada_hora": _first_present(entrada, "hora", "entrada") or data.get("hora_entrada") or "",
+            "salida_hora": _first_present(salida, "hora", "salida") or data.get("hora_salida") or "",
+            "entrada": entrada,
+            "salida": salida,
+        })
+
     return rows
 
 
@@ -271,9 +379,16 @@ def _save_asistencia(data: dict):
 
 
 # ── Enriquecimiento de filas ───────────────────────────────────────────────────
-def _enrich(rows, workers):
+def _enrich(rows, workers, schedule_rows=None):
     by_id  = {str(w["id_trabajador"]): w for w in workers}
     by_dni = {str(w["dni"]): w for w in workers}
+    schedule_index = {}
+
+    for sched in (schedule_rows or []):
+        worker_id = str(sched.get("id_trabajador") or "").strip()
+        sched_date = _normalize_schedule_date(sched.get("fecha")) or (sched.get("fecha_dt").isoformat() if sched.get("fecha_dt") else "")
+        if worker_id and sched_date:
+            schedule_index[(worker_id, sched_date)] = sched
 
     result = []
     for row in rows:
@@ -292,6 +407,24 @@ def _enrich(rows, workers):
 
         if not item["nombre_trabajador"]:
             item["nombre_trabajador"] = item.get("id_trabajador") or item.get("dni") or "Sin nombre"
+
+        entrada = item.get("entrada") if isinstance(item.get("entrada"), dict) else {}
+        salida = item.get("salida") if isinstance(item.get("salida"), dict) else {}
+
+        item["hora_inicio"] = item.get("hora_inicio") or entrada.get("hora") or ""
+        item["hora_final"] = item.get("hora_final") or salida.get("hora") or ""
+
+        match_key = (
+            str(item.get("id_trabajador") or "").strip(),
+            _normalize_schedule_date(item.get("fecha")) or (item.get("fecha_dt").isoformat() if item.get("fecha_dt") else ""),
+        )
+        schedule = schedule_index.get(match_key)
+        if schedule:
+            item["entrada_programada"] = schedule.get("entrada_hora") or ""
+            item["salida_programada"] = schedule.get("salida_hora") or ""
+        else:
+            item["entrada_programada"] = item.get("hora_inicio") or entrada.get("hora") or ""
+            item["salida_programada"] = item.get("hora_final") or salida.get("hora") or ""
 
         # rango horario para mostrar en la tarjeta
         ini = item.get("hora_inicio") or ""
@@ -421,7 +554,7 @@ def _week_grid(rows, week_start):
 
 
 # ── Vista principal ────────────────────────────────────────────────────────────
-def render_asistencias():
+def render_asistencias(api=None):
     st.markdown(SHARED_CSS, unsafe_allow_html=True)
 
     # Encabezado de página
@@ -448,11 +581,12 @@ def render_asistencias():
             asistencias  = _get_asistencias_full()
             trabajadores = _get_trabajadores()
             tiendas      = _get_tiendas()
+            dias         = _get_dias_schedule()
         except Exception as exc:
             st.error(f"Error al conectar con Firebase: {exc}")
             st.stop()
 
-    rows = _enrich(asistencias, trabajadores)
+    rows = _enrich(asistencias, trabajadores, dias)
 
     # ── Métricas globales ──────────────────────────────────────────────────────
     m1, m2, m3, m4 = st.columns(4)
@@ -490,17 +624,19 @@ def render_asistencias():
         table = sorted(week_rows, key=lambda r: (r["fecha_dt"], r.get("nombre_trabajador", "")))
         st.dataframe(
             [{
-                "Fecha":       r["fecha_dt"].strftime("%d/%m/%Y"),
-                "Día":         WEEK_DAYS[r["fecha_dt"].weekday()],
-                "Trabajador":  r.get("nombre_trabajador", ""),
-                "DNI":         r.get("dni", ""),
-                "Tienda":      r.get("nombre_tienda", ""),
-                "Sede":        r.get("nombre_sede", ""),
-                "Entrada":     r.get("hora_inicio", ""),
-                "Ini. receso": r.get("inicio_receso", ""),
-                "Fin receso":  r.get("final_receso", ""),
-                "Salida":      r.get("hora_final", ""),
-                "Última marca":r.get("ultima_marca", ""),
+                "Fecha":            r["fecha_dt"].strftime("%d/%m/%Y"),
+                "Día":              WEEK_DAYS[r["fecha_dt"].weekday()],
+                "Trabajador":       r.get("nombre_trabajador", ""),
+                "DNI":              r.get("dni", ""),
+                "Tienda":           r.get("nombre_tienda", ""),
+                "Sede":             r.get("nombre_sede", ""),
+                "Entrada prevista": r.get("entrada_programada", ""),
+                "Entrada":          r.get("hora_inicio", ""),
+                "Ini. receso":      r.get("inicio_receso", ""),
+                "Fin receso":       r.get("final_receso", ""),
+                "Salida prevista":  r.get("salida_programada", ""),
+                "Salida":           r.get("hora_final", ""),
+                "Última marca":     r.get("ultima_marca", ""),
             } for r in table],
             use_container_width=True,
             hide_index=True,

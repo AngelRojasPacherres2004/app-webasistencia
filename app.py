@@ -48,7 +48,7 @@ st.markdown("""
 :root {
     --primary:   #ffffff;
     --secondary: #eaf4ff;
-    --tertiary:  #e53935;
+    --tertiary:  #2563eb;
     --bg:        var(--primary);
     --surface:   var(--primary);
     --surface-2: var(--secondary);
@@ -72,15 +72,51 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
 [data-testid="stHeader"] { background: rgba(255,255,255,0.88) !important; }
 [data-testid="stToolbar"] { display: none; }
 [data-testid="stSidebar"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    transform: none !important;
+    left: 0 !important;
+    right: auto !important;
+    width: 20rem !important;
+    min-width: 20rem !important;
+    max-width: 20rem !important;
     background: var(--primary) !important;
-    border-right: 1px solid var(--border);
-    box-shadow: 8px 0 30px rgba(120,189,242,0.12);
+    border-right: 1px solid var(--border) !important;
+    box-shadow: 8px 0 30px rgba(120,189,242,0.12) !important;
+    z-index: 20 !important;
+}
+[data-testid="stSidebar"][aria-hidden="true"],
+[data-testid="stSidebar"][aria-expanded="false"] {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    transform: none !important;
+    left: 0 !important;
+    width: 20rem !important;
+    min-width: 20rem !important;
+    max-width: 20rem !important;
 }
 [data-testid="stSidebar"] > div:first-child {
     padding-top: 1.25rem;
+    width: 100% !important;
+}
+[data-testid="stSidebar"] > div {
+    width: 100% !important;
 }
 [data-testid="stSidebar"] [role="radiogroup"] {
     gap: 0.45rem;
+}
+[data-testid="stSidebar"] [data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebar"] button,
+[data-testid="stSidebar"] [role="button"],
+[data-testid="stSidebar"] [aria-label*="sidebar"],
+[data-testid="stSidebar"] [aria-label*="colaps"],
+[data-testid="stSidebar"] [aria-label*="expand"],
+[data-testid="stSidebar"] [data-testid*="sidebar"] {
+    display: inline-flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 [data-testid="stSidebar"] label {
     border: 1px solid var(--border);
@@ -229,7 +265,7 @@ p, [data-testid="stText"], small, label {
     color: #ffffff !important;
     background: var(--tertiary) !important;
     border-color: var(--tertiary) !important;
-    box-shadow: 0 10px 20px rgba(229,57,53,0.20) !important;
+    box-shadow: 0 10px 20px rgba(37,99,235,0.20) !important;
 }
 [data-testid="stTabsContent"] {
     padding-top: 1.5rem !important;
@@ -265,6 +301,31 @@ p, [data-testid="stText"], small, label {
     margin-bottom: 0.25rem !important;
 }
 
+/* Sliders */
+[data-testid="stSlider"] {
+    padding: 0.25rem 0 !important;
+}
+[data-testid="stSlider"] input[type="range"] {
+    opacity: 1 !important;
+    visibility: visible !important;
+    display: block !important;
+}
+[data-testid="stSlider"] [role="slider"] {
+    opacity: 1 !important;
+    visibility: visible !important;
+    background: var(--tertiary) !important;
+    border: 2px solid #ffffff !important;
+    box-shadow: 0 0 0 4px rgba(37,99,235,0.18) !important;
+}
+[data-testid="stSlider"] [data-baseweb="slider"] {
+    background: #dbeafe !important;
+    border-radius: 999px !important;
+}
+[data-testid="stSlider"] [data-baseweb="slider"] > div {
+    background: var(--tertiary) !important;
+    border-radius: 999px !important;
+}
+
 /* Botón principal */
 [data-testid="stFormSubmitButton"] button,
 .stButton button {
@@ -278,7 +339,7 @@ p, [data-testid="stText"], small, label {
     letter-spacing: 0.08em !important;
     padding: 0.72rem 1.5rem !important;
     transition: background 0.15s, box-shadow 0.15s, transform 0.1s !important;
-    box-shadow: 0 10px 20px rgba(229,57,53,0.18) !important;
+    box-shadow: 0 10px 20px rgba(37,99,235,0.18) !important;
     position: relative !important;
     overflow: hidden !important;
 }
@@ -289,9 +350,9 @@ p, [data-testid="stText"], small, label {
 }
 [data-testid="stFormSubmitButton"] button:hover,
 .stButton button:hover {
-    background: #c92f2b !important;
+    background: #1d4ed8 !important;
     transform: translateY(-2px) !important;
-    box-shadow: 0 14px 26px rgba(229,57,53,0.24) !important;
+    box-shadow: 0 14px 26px rgba(37,99,235,0.24) !important;
 }
 [data-testid="stFormSubmitButton"] button:active,
 .stButton button:active {
