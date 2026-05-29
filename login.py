@@ -239,7 +239,7 @@ def render_login():
             padding: 1.05rem 1.1rem;
             border: 1px solid #d4d4d8;
             border-radius: 14px;
-            background: linear-gradient(180deg, #ffffff, #f8fafc);
+            background: #ffffff;
             box-shadow: 0 12px 28px rgba(15,23,42,0.10);
         }}
         [data-testid="stForm"] {{

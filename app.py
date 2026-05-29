@@ -22,7 +22,6 @@ import streamlit as st
 from firebase_admin import credentials, firestore
 from cloudinary_uploader import upload_worker_file
 from login import is_authenticated, render_login, logout
-from sections.asistencias import render_asistencias
 from sections.overview import render_overview
 from sections.tiendas import render_tiendas
 from sections.trabajadores import render_trabajadores
@@ -64,12 +63,12 @@ st.markdown("""
 
 /* Base */
 html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .main {
-    background: linear-gradient(180deg, var(--primary) 0%, var(--secondary) 100%) !important;
+    background: var(--primary) !important;
     color: var(--text) !important;
     font-family: var(--sans) !important;
 }
 [data-testid="stAppViewContainer"] > .main { background: transparent !important; }
-[data-testid="stHeader"] { background: rgba(255,255,255,0.88) !important; }
+[data-testid="stHeader"] { background: var(--tertiary) !important; }
 [data-testid="stToolbar"] { display: none; }
 [data-testid="stSidebar"] {
     display: block !important;
@@ -86,16 +85,10 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     box-shadow: 8px 0 30px rgba(120,189,242,0.12) !important;
     z-index: 20 !important;
 }
-[data-testid="stSidebar"][aria-hidden="true"],
-[data-testid="stSidebar"][aria-expanded="false"] {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    transform: none !important;
-    left: 0 !important;
-    width: 20rem !important;
-    min-width: 20rem !important;
-    max-width: 20rem !important;
+[data-testid="stSidebar"] {
+    background: var(--primary) !important;
+    border-right: 1px solid var(--border) !important;
+    box-shadow: 8px 0 30px rgba(120,189,242,0.12) !important;
 }
 [data-testid="stSidebar"] > div:first-child {
     padding-top: 1.25rem;
@@ -106,17 +99,6 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
 }
 [data-testid="stSidebar"] [role="radiogroup"] {
     gap: 0.45rem;
-}
-[data-testid="stSidebar"] [data-testid="stSidebarCollapsedControl"],
-[data-testid="stSidebar"] button,
-[data-testid="stSidebar"] [role="button"],
-[data-testid="stSidebar"] [aria-label*="sidebar"],
-[data-testid="stSidebar"] [aria-label*="colaps"],
-[data-testid="stSidebar"] [aria-label*="expand"],
-[data-testid="stSidebar"] [data-testid*="sidebar"] {
-    display: inline-flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
 }
 [data-testid="stSidebar"] label {
     border: 1px solid var(--border);
@@ -131,11 +113,14 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     transform: translateX(2px);
 }
 [data-testid="stSidebar"] label:has(input:checked) {
-    background: var(--secondary);
-    border-color: var(--accent);
-    box-shadow: inset 4px 0 0 var(--tertiary);
+    background: var(--tertiary) !important;
+    border-color: var(--tertiary) !important;
+    color: #ffffff !important;
+    box-shadow: inset 4px 0 0 rgba(255,255,255,0.35);
 }
-
+[data-testid="stSidebar"] label:has(input:checked) * {
+    color: #ffffff !important;
+}
 /* Main container */
 .main .block-container {
     padding: 2rem 2.2rem 4rem !important;
@@ -166,7 +151,7 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     height: 100%;
     right: 0;
     top: 0;
-    background: linear-gradient(90deg, rgba(234,244,255,0), var(--secondary));
+    background: var(--primary);
 }
 .hero-banner::after {
     content: "";
@@ -175,7 +160,7 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     height: 3px;
     left: 0;
     bottom: 0;
-    background: linear-gradient(90deg, var(--accent), var(--tertiary));
+    background: var(--tertiary);
 }
 
 /* Títulos */
@@ -228,8 +213,8 @@ p, [data-testid="stText"], small, label {
     right: 0;
     bottom: 0;
     height: 2px;
-    background: linear-gradient(90deg, var(--accent), var(--tertiary));
-    opacity: 0.65;
+    background: var(--accent);
+    opacity: 1;
 }
 [data-testid="stMetricLabel"] {
     font-family: var(--mono) !important;
@@ -1215,7 +1200,6 @@ def admin_page():
         "Resumen": render_overview,
         "Tiendas": render_tiendas,
         "Trabajadores": render_trabajadores,
-        "Asistencias": render_asistencias,
     }
 
     with st.sidebar:
@@ -1257,7 +1241,7 @@ def admin_page():
             </div>
             <div style="font-family:'Space Mono',monospace;font-size:0.64rem;letter-spacing:0.08em;
                         text-transform:uppercase;padding:0.38rem 0.7rem;border-radius:8px;
-                        color:#ffffff;background:#e53935;">
+                        color:#ffffff;background:var(--tertiary);">
                 {current_page}
             </div>
         </div>

@@ -15,7 +15,7 @@ MARCACIONES = [
 OVERVIEW_CSS = """
 <style>
 [data-testid="stAppViewContainer"] {
-    background: linear-gradient(160deg,#f0f4ff 0%,#f8fafc 60%,#f1f5f9 100%) !important;
+    background: #f8fafc !important;
 }
 [data-testid="stMetric"] {
     background: #fff !important;
@@ -48,8 +48,10 @@ OVERVIEW_CSS = """
     padding: .55rem .9rem !important;
 }
 [data-testid="stTabs"] button[aria-selected="true"] {
-    color: #2563eb !important;
-    border-bottom: 2px solid #2563eb !important;
+    color: #ffffff !important;
+    background: #2563eb !important;
+    border-radius: 10px !important;
+    border-bottom: 2px solid #1d4ed8 !important;
 }
 [data-testid="stTabs"] [role="tablist"] {
     border-bottom: 1px solid #e2e8f0 !important;
