@@ -1,6 +1,7 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 def _parse_date(value):
@@ -19,45 +20,101 @@ def _week_label(start_date):
     return f"{start_date.strftime('%d/%m/%Y')}  →  {end_date.strftime('%d/%m/%Y')}"
 
 
-def _render_attendance_table(attendance_rows):
-    if not attendance_rows:
-        return None
+def _cell_html(attendance_row):
+    if not attendance_row:
+        return '<span class="m-empty">—</span>'
 
+    entrada = attendance_row.get("hora_inicio") or "—"
+    salida = attendance_row.get("hora_final") or "—"
+    is_late = bool(attendance_row.get("late"))
+    entrada_color = "#dc2626" if is_late else "#1d4ed8"
+    return (
+        '<div style="display:flex;flex-direction:column;gap:.12rem;line-height:1.15;">'
+        f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:{entrada_color};font-weight:700;">{entrada}</span>'
+        f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:#166534;font-weight:700;">{salida}</span>'
+        "</div>"
+    )
+
+
+def _render_weekly_matrix(workers, attendance_map, days):
     rows_html = []
-    for row in attendance_rows:
+    for worker in workers:
+        dni = worker.get("dni", "")
+        worker_attendance = attendance_map.get(dni, {})
+        day_cells = []
+        for current_day in days:
+            attendance_row = worker_attendance.get(current_day)
+            day_cells.append(f"<td>{_cell_html(attendance_row)}</td>")
+
         rows_html.append(
             f"""
             <tr>
               <td class="worker-td">
-                <div class="worker-name">{row.get('nombre_trabajador', '—')}</div>
-                <div class="worker-meta">DNI {row.get('dni', '—')} · {row.get('nombre_tienda', '—')}</div>
+                <div class="worker-name">{worker.get('nombre_trabajador', '—')}</div>
+                <div class="worker-meta">DNI {dni} · {worker.get('nombre_sede', '—')}</div>
               </td>
-              <td>{row.get('fecha', '—')}</td>
-              <td>{row.get('hora_inicio', '—')}</td>
-              <td>{row.get('inicio_receso', '—')}</td>
-              <td>{row.get('final_receso', '—')}</td>
-              <td>{row.get('hora_final', '—')}</td>
+              {''.join(day_cells)}
             </tr>
             """
         )
 
+    header_cells = "".join(
+        f"<th>{day.strftime('%A')}<br><span style='font-weight:400;font-size:.6rem;'>{day.strftime('%d/%m')}</span></th>"
+        for day in days
+    )
+
     return f"""
-    <div style="overflow-x:auto;border:1px solid #e2e8f0;border-radius:12px;
-                background:#fff;box-shadow:0 1px 6px rgba(15,23,42,.04);">
-      <table class="at-table">
-        <thead>
-          <tr>
-            <th>Trabajador</th>
-            <th>Fecha</th>
-            <th>Entrada</th>
-            <th>Ini. receso</th>
-            <th>Fin receso</th>
-            <th>Salida</th>
-          </tr>
-        </thead>
-        <tbody>{''.join(rows_html)}</tbody>
-      </table>
-    </div>
+    <html>
+    <head>
+      <style>
+        body {{ margin:0; font-family:'DM Sans', sans-serif; }}
+        .wrap {{
+          overflow-x:auto;
+          border:1px solid #e2e8f0;
+          border-radius:12px;
+          background:#fff;
+          box-shadow:0 1px 6px rgba(15,23,42,.04);
+        }}
+        .at-table {{ width:100%; border-collapse:collapse; font-size:.85rem; }}
+        .at-table thead th {{
+            text-align:left;
+            padding:.85rem .9rem;
+            background:#f8fafc;
+            color:#64748b;
+            font-family:'Space Mono',monospace;
+            font-size:.68rem;
+            text-transform:uppercase;
+            letter-spacing:.1em;
+            border-bottom:1px solid #e2e8f0;
+            white-space:nowrap;
+        }}
+        .at-table tbody tr {{ border-bottom:1px solid #f1f5f9; }}
+        .at-table tbody tr:hover {{ background:#fafbff; }}
+        .at-table td {{ padding:1rem .9rem; vertical-align:middle; color:#1e293b; }}
+        .at-table td.worker-td {{ min-width:180px; }}
+        .worker-name {{ font-weight:700; color:#0f172a; font-size:.85rem; }}
+        .worker-meta {{ font-size:.69rem; color:#64748b; margin-top:.15rem; }}
+        .m-empty {{
+            color:#94a3b8;
+            font-family:'Space Mono',monospace;
+            font-size:.78rem;
+        }}
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <table class="at-table">
+          <thead>
+            <tr>
+              <th>Trabajador</th>
+              {header_cells}
+            </tr>
+          </thead>
+          <tbody>{''.join(rows_html)}</tbody>
+        </table>
+      </div>
+    </body>
+    </html>
     """
 
 
@@ -75,7 +132,7 @@ def render_resumen(api=None):
                     Asistencias
                 </div>
                 <div style="font-size:0.78rem;color:#6b7280;font-family:'DM Sans',sans-serif;margin-top:0.15rem;">
-                    Vista semanal · PostgreSQL
+                    Vista semanal por trabajador · PostgreSQL
                 </div>
             </div>
         </div>
@@ -86,12 +143,17 @@ def render_resumen(api=None):
 
     with st.spinner("Cargando asistencias..."):
         asistencias = api.get_asistencias()
+        trabajadores = api.get_trabajadores()
+        tiendas = api.get_tiendas()
+        horarios = api.get_horarios_trabajador()
 
     valid_dates = [_parse_date(row.get("fecha")) for row in asistencias if _parse_date(row.get("fecha"))]
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Registros", len(asistencias))
-    m2.metric("Trabajadores", len({row.get("dni") for row in asistencias if row.get("dni")}))
-    m3.metric(
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Tiendas", len(tiendas))
+    m2.metric("Trabajadores", len(trabajadores))
+    m3.metric("Registros", len(asistencias))
+    m4.metric(
         "Rango de fechas",
         f"{min(valid_dates).strftime('%d/%m')} – {max(valid_dates).strftime('%d/%m')}"
         if valid_dates else "—",
@@ -104,6 +166,7 @@ def render_resumen(api=None):
 
     current_start = _week_start(st.session_state["resumen_week"])
     week_end = current_start + timedelta(days=6)
+    week_days = [current_start + timedelta(days=i) for i in range(7)]
 
     st.markdown(
         f"""
@@ -111,7 +174,7 @@ def render_resumen(api=None):
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;">
             <div>
               <div class="week-panel-title">Asistencias semanales</div>
-              <div class="week-panel-sub">Solo marcas de asistencia, sin trabajadores ni tiendas</div>
+              <div class="week-panel-sub">Cada día muestra solo la hora de entrada y salida</div>
             </div>
             <span class="week-range-badge">{_week_label(current_start)}</span>
           </div>
@@ -122,7 +185,7 @@ def render_resumen(api=None):
 
     sc1, sc2, sc3 = st.columns([3, 1, 1])
     search_query = sc1.text_input(
-        "Buscar", placeholder="Nombre, DNI o fecha…", key="resumen_search", label_visibility="collapsed"
+        "Buscar", placeholder="Nombre, DNI o sede…", key="resumen_search", label_visibility="collapsed"
     )
     if sc2.button("← Anterior", use_container_width=True):
         st.session_state["resumen_week"] = current_start - timedelta(days=7)
@@ -132,21 +195,77 @@ def render_resumen(api=None):
         st.session_state["resumen_week"] = picked
         current_start = _week_start(picked)
         week_end = current_start + timedelta(days=6)
+        week_days = [current_start + timedelta(days=i) for i in range(7)]
 
     st.caption(f"Semana: `{_week_label(current_start)}` · `{len(asistencias):,}` registros")
 
-    filtered_rows = []
+    attendance_map = {}
     for row in asistencias:
         parsed = _parse_date(row.get("fecha"))
         if not parsed or not (current_start <= parsed <= week_end):
             continue
-        text = f"{row.get('nombre_trabajador', '')} {row.get('dni', '')} {row.get('nombre_tienda', '')} {row.get('fecha', '')}".lower()
+        worker_key = str(row.get("dni", "")).strip()
+        attendance_map.setdefault(worker_key, {})[parsed] = row
+
+    schedule_map = {}
+    for row in horarios:
+        dni = str(row.get("dni_trabajador", "")).strip()
+        day_name = str(row.get("dia_semana", "")).strip()
+        entrada_schedule = row.get("horario_entrada")
+        if isinstance(entrada_schedule, str):
+            try:
+                entrada_schedule = datetime.strptime(entrada_schedule[:5], "%H:%M").time()
+            except ValueError:
+                entrada_schedule = None
+        schedule_map.setdefault(dni, {})[day_name] = entrada_schedule
+
+    day_name_map = {
+        0: "lunes",
+        1: "martes",
+        2: "miercoles",
+        3: "jueves",
+        4: "viernes",
+        5: "sabado",
+        6: "domingo",
+    }
+
+    for worker_dni, worker_days in attendance_map.items():
+        for day_date, attendance_row in worker_days.items():
+            worker_schedule = schedule_map.get(worker_dni, {})
+            scheduled_time = worker_schedule.get(day_name_map.get(day_date.weekday(), ""))
+            actual_time = attendance_row.get("hora_inicio")
+            if isinstance(actual_time, str):
+                actual_time = actual_time[:5]
+            if scheduled_time and actual_time:
+                try:
+                    actual_obj = datetime.strptime(actual_time[:5], "%H:%M").time()
+                    attendance_row["late"] = actual_obj > scheduled_time
+                except ValueError:
+                    attendance_row["late"] = False
+            else:
+                attendance_row["late"] = False
+
+    filtered_workers = []
+    for worker in trabajadores:
+        text = f"{worker.get('nombre_trabajador', '')} {worker.get('dni', '')} {worker.get('nombre_sede', '')}".lower()
         if search_query and search_query.lower() not in text:
             continue
-        filtered_rows.append(row)
+        filtered_workers.append(worker)
 
-    table_html = _render_attendance_table(filtered_rows)
+    total_present = sum(
+        1
+        for worker in filtered_workers
+        for current_day in week_days
+        if attendance_map.get(worker.get("dni", ""), {}).get(current_day)
+    )
+    total_possible = len(filtered_workers) * 7
+
+    c1, c2 = st.columns(2)
+    c1.metric("Marcas en la semana", total_present)
+    c2.metric("Faltas en la semana", max(total_possible - total_present, 0))
+
+    table_html = _render_weekly_matrix(filtered_workers, attendance_map, week_days)
     if table_html:
-        st.markdown(table_html, unsafe_allow_html=True)
+        components.html(table_html, height=max(320, 92 + (len(filtered_workers) * 88)), scrolling=True)
     else:
-        st.info("No hay asistencias para este rango.")
+        st.info("No hay trabajadores o asistencias para este rango.")
