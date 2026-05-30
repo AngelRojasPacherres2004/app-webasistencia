@@ -398,6 +398,27 @@ def _parse_time_value(value):
         return None
 
 
+def _time_select_options(step_minutes=15):
+    options = ["Sin registro"]
+    current_minutes = 0
+    while current_minutes < 24 * 60:
+        hour_value = current_minutes // 60
+        minute_value = current_minutes % 60
+        options.append(f"{hour_value:02d}:{minute_value:02d}")
+        current_minutes += step_minutes
+    return options
+
+
+def _time_select_index(current_value, options):
+    if not current_value:
+        return 0
+    normalized = format_time(current_value)[:5]
+    try:
+        return options.index(normalized)
+    except ValueError:
+        return 0
+
+
 def build_schedule_inputs(selected_days, key_prefix="schedule", initial_schedule=None):
     if not selected_days:
         return {}
@@ -420,10 +441,36 @@ def build_schedule_inputs(selected_days, key_prefix="schedule", initial_schedule
         cols = st.columns([1.2, 1, 1, 1, 1])
         cols[0].markdown(f'<span style="font-family:Space Mono,monospace;font-size:0.78rem;color:var(--text);">{day.capitalize()}</span>', unsafe_allow_html=True)
         day_initial = (initial_schedule or {}).get(day, {})
+
+        time_options = _time_select_options()
+        inicio_receso_selection = cols[2].selectbox(
+            "Inicio receso",
+            options=time_options,
+            index=_time_select_index(
+                day_initial.get("horario_inicio_receso") or day_initial.get("inicio_receso"),
+                time_options,
+            ),
+            key=f"{key_prefix}_{day}_inicio_receso",
+            label_visibility="collapsed",
+        )
+        inicio_receso_value = None if inicio_receso_selection == "Sin registro" else inicio_receso_selection
+
+        fin_receso_selection = cols[3].selectbox(
+            "Fin receso",
+            options=time_options,
+            index=_time_select_index(
+                day_initial.get("horario_fin_receso") or day_initial.get("final_receso"),
+                time_options,
+            ),
+            key=f"{key_prefix}_{day}_fin_receso",
+            label_visibility="collapsed",
+        )
+        fin_receso_value = None if fin_receso_selection == "Sin registro" else fin_receso_selection
+
         schedule[day] = {
             "hora_inicio":    format_time(cols[1].time_input("Hora inicio",    value=_parse_time_value(day_initial.get("horario_entrada") or day_initial.get("hora_inicio")),    key=f"{key_prefix}_{day}_hora_inicio",    label_visibility="collapsed")),
-            "inicio_receso":  format_time(cols[2].time_input("Inicio receso",  value=_parse_time_value(day_initial.get("horario_inicio_receso") or day_initial.get("inicio_receso")),  key=f"{key_prefix}_{day}_inicio_receso",  label_visibility="collapsed")),
-            "final_receso":   format_time(cols[3].time_input("Final receso",   value=_parse_time_value(day_initial.get("horario_fin_receso") or day_initial.get("final_receso")),   key=f"{key_prefix}_{day}_final_receso",   label_visibility="collapsed")),
+            "inicio_receso":  inicio_receso_value,
+            "final_receso":   fin_receso_value,
             "hora_final":     format_time(cols[4].time_input("Hora final",     value=_parse_time_value(day_initial.get("horario_salida") or day_initial.get("hora_final")),     key=f"{key_prefix}_{day}_hora_final",     label_visibility="collapsed")),
         }
     return schedule
