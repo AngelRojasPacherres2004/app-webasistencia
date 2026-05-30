@@ -1,6 +1,6 @@
 # Panel Admin - Asistencia
 
-Aplicacion Streamlit conectada a Firebase para crear documentos en las colecciones `tienda`, `qr_activos`, `trabajador` y `asistencia`.
+Aplicacion Streamlit conectada directo a PostgreSQL de Supabase usando `DATABASE_URL` para crear y consultar datos en tus tablas reales: `tienda`, `qr`, `trabajador`, `horario_trabajador`, `asistencia` y `administrador`.
 
 ## Ejecutar
 
@@ -11,13 +11,18 @@ streamlit run app.py
 
 ## Credenciales
 
-La app lee el service account desde cualquiera de estos archivos:
+La app solo necesita que pegues tu `DATABASE_URL` en `.env`:
 
-```text
-.streamlit/secrets.toml
-.streamlit/secret.toml
-.streamlit/secrets,toml
-.streamlit/firebase-service-account.json
+```env
+DATABASE_URL=postgresql://postgres:TU_PASSWORD@aws-1-us-east-1.pooler.supabase.com:5432/postgres
+```
+
+Opcionalmente puedes guardar un usuario de emergencia para el login en la misma ruta:
+
+```toml
+[admin_auth]
+username = "admin"
+password = "admin123"
 ```
 
 Para subir archivos de trabajadores a Cloudinary, crea una cuenta en Cloudinary y copia tus credenciales desde el dashboard.
@@ -33,121 +38,16 @@ folder = "trabajadores_dni"
 ```
 
 ## Coleccion tienda
-
-Cada documento se guarda en:
-
-```text
-tienda/{id_tienda}
-```
-
-Campos:
-
-```text
-id_tienda
-correo
-password
-contrasena
-nombre_tienda
-id_sede
-nombre_sede
-direccion
-```
-
-Al crear una tienda tambien se genera automaticamente su QR activo en:
-
-```text
-qr_activos/{id_tienda}
-```
-
-Campos:
-
-```text
-id_tienda
-nombre_tienda
-id_sede
-nombre_sede
-direccion
-token
-activo
-fecha_creada
-```
-
-El QR dinamico debe usar el campo `token`; cada tienda nueva recibe un token unico.
+Cada tienda se guarda en `tienda` y el QR activo se crea en `qr` con el `token` unico. La app usa `id_tienda` como UUID y guarda la contrasena como hash bcrypt en `contrasena`.
 
 ## Coleccion trabajador
 
-Cada documento se guarda en:
+Cada trabajador se guarda en `trabajador` y su horario por dia se guarda en `horario_trabajador`. La app usa `dni` como clave del trabajador y `id_tienda` para enlazarlo con su tienda.
 
-```text
-trabajador/{id_trabajador}
-```
-
-Campos:
-
-```text
-id_trabajador
-correo
-password
-contrasena
-area
-dni
-foto_dni
-foto_dni_public_id
-foto_dni_asset_id
-foto_dni_resource_type
-foto_dni_nombre_archivo
-id_sede
-nombre_sede
-nombre_trabajador
-cuenta_bancaria
-fecha_creada
-horario
-```
-
-Al crear el trabajador se eligen los dias que tendran horario. El campo `horario` guarda solo los dias seleccionados:
-
-```text
-horario.lunes.hora_inicio
-horario.lunes.inicio_receso
-horario.lunes.final_receso
-horario.lunes.hora_final
-```
-
-La misma estructura se repite para:
-
-```text
-martes
-miercoles
-jueves
-viernes
-sabado
-```
-
-En el resumen se muestran los documentos leidos desde Firebase para `tienda`, `trabajador` y `asistencia`. Las contraseñas no se muestran en la tabla; solo aparece si el registro tiene contraseña.
+En el resumen se muestran los registros leidos desde PostgreSQL para `tienda`, `trabajador` y `asistencia`.
 
 ## Coleccion asistencia
 
-Cada documento se guarda en:
-
-```text
-asistencia/{id_trabajador}_{fecha}_{id_tienda}
-```
-
-Campos:
-
-```text
-nombre_tienda
-id_tienda
-id_trabajador
-fecha
-hora_inicio
-inicio_receso
-final_receso
-hora_finalhas
-ultima_marca
-id_sede
-nombre_sede
-dni
-```
+Cada asistencia se guarda en `asistencia` con `dni_trabajador`, `fecha` y las marcas `timestamptz` reales (`horario_entrada`, `horario_inicio_receso`, `horario_fin_receso`, `horario_salida`).
 # asistencia-web
 # app-webasistencia

@@ -1,9 +1,9 @@
 ﻿from pathlib import Path
 from uuid import uuid4
-from datetime import date
+from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
-import json
 import base64
+from zoneinfo import ZoneInfo
 try:
     import tomllib
 except ImportError:
@@ -17,14 +17,23 @@ except ImportError:
                 return _toml.loads(content)
         tomllib = _TomlFallback()
 
-import firebase_admin
 import streamlit as st
-from firebase_admin import credentials, firestore
 from cloudinary_uploader import upload_worker_file
 from login import is_authenticated, render_login, logout
-from sections.overview import render_overview
+from sections.asistencias_resumen import render_resumen
 from sections.tiendas import render_tiendas
 from sections.trabajadores import render_trabajadores
+from supabase_backend import (
+    create_store_with_qr as backend_create_store_with_qr,
+    document_exists as backend_document_exists,
+    delete_document,
+    fetch_rows,
+    hash_password,
+    server_timestamp,
+    update_document,
+    upsert_document,
+)
+from config.db import get_connection
 
 
 st.set_page_config(
@@ -39,401 +48,35 @@ background_image_b64 = ""
 if BACKGROUND_IMAGE_PATH.exists():
     background_image_b64 = base64.b64encode(BACKGROUND_IMAGE_PATH.read_bytes()).decode("utf-8")
 
-# ── Tema visual ────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+# ?? Tema visual ????????????????????????????????????????????????????????????????
 
-:root {
-    --primary:   #ffffff;
-    --secondary: #eaf4ff;
-    --tertiary:  #2563eb;
-    --bg:        var(--primary);
-    --surface:   var(--primary);
-    --surface-2: var(--secondary);
-    --border:    #cfe3f7;
-    --accent:    #78bdf2;
-    --accent2:   #d8efff;
-    --danger:    var(--tertiary);
-    --text:      #1f2a37;
-    --muted:     #5f7182;
-    --mono:      'Space Mono', monospace;
-    --sans:      'DM Sans', sans-serif;
-}
+def apply_global_css():
+    css_path = Path("styles/global.css")
+    if not css_path.exists():
+        return
+    st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
-/* Base */
-html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .main {
-    background: var(--primary) !important;
-    color: var(--text) !important;
-    font-family: var(--sans) !important;
-}
-[data-testid="stAppViewContainer"] > .main { background: transparent !important; }
-[data-testid="stHeader"] { background: var(--tertiary) !important; }
-[data-testid="stToolbar"] { display: none; }
-[data-testid="stSidebar"] {
-    display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    transform: none !important;
-    left: 0 !important;
-    right: auto !important;
-    width: 20rem !important;
-    min-width: 20rem !important;
-    max-width: 20rem !important;
-    background: var(--primary) !important;
-    border-right: 1px solid var(--border) !important;
-    box-shadow: 8px 0 30px rgba(120,189,242,0.12) !important;
-    z-index: 20 !important;
-}
-[data-testid="stSidebar"] {
-    background: var(--primary) !important;
-    border-right: 1px solid var(--border) !important;
-    box-shadow: 8px 0 30px rgba(120,189,242,0.12) !important;
-}
-[data-testid="stSidebar"] > div:first-child {
-    padding-top: 1.25rem;
-    width: 100% !important;
-}
-[data-testid="stSidebar"] > div {
-    width: 100% !important;
-}
-[data-testid="stSidebar"] [role="radiogroup"] {
-    gap: 0.45rem;
-}
-[data-testid="stSidebar"] label {
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--primary);
-    padding: 0.72rem 0.8rem;
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
-}
-[data-testid="stSidebar"] label:hover {
-    background: var(--secondary);
-    border-color: var(--accent);
-    transform: translateX(2px);
-}
-[data-testid="stSidebar"] label:has(input:checked) {
-    background: var(--tertiary) !important;
-    border-color: var(--tertiary) !important;
-    color: #ffffff !important;
-    box-shadow: inset 4px 0 0 rgba(255,255,255,0.35);
-}
-[data-testid="stSidebar"] label:has(input:checked) * {
-    color: #ffffff !important;
-}
-/* Main container */
-.main .block-container {
-    padding: 2rem 2.2rem 4rem !important;
-    max-width: 1180px;
-    animation: fadeSlide 0.45s ease-out !important;
-}
 
-@keyframes fadeSlide {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-}
+apply_global_css()
 
-.hero-banner {
-    position: relative;
-    border: 1px solid var(--border);
-    border-left: 5px solid var(--tertiary);
-    background: var(--primary);
-    border-radius: 8px;
-    padding: 1.2rem 1.35rem;
-    margin-bottom: 1rem;
-    box-shadow: 0 14px 32px rgba(120,189,242,0.16);
-    overflow: hidden;
-}
-.hero-banner::before {
-    content: "";
-    position: absolute;
-    width: 35%;
-    height: 100%;
-    right: 0;
-    top: 0;
-    background: var(--primary);
-}
-.hero-banner::after {
-    content: "";
-    position: absolute;
-    width: 100%;
-    height: 3px;
-    left: 0;
-    bottom: 0;
-    background: var(--tertiary);
-}
-
-/* Títulos */
-h1 {
-    font-family: var(--mono) !important;
-    font-size: 1.5rem !important;
-    letter-spacing: 0.03em !important;
-    color: var(--text) !important;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 1rem;
-    margin-bottom: 0.25rem !important;
-}
-h2, h3 {
-    font-family: var(--mono) !important;
-    font-size: 0.85rem !important;
-    letter-spacing: 0.08em !important;
-    text-transform: uppercase !important;
-    color: var(--muted) !important;
-    margin-top: 1.5rem !important;
-}
-p, [data-testid="stText"], small, label {
-    font-family: var(--sans) !important;
-    color: var(--text) !important;
-}
-.stCaption, [data-testid="stCaptionContainer"] {
-    font-family: var(--mono) !important;
-    font-size: 0.72rem !important;
-    color: var(--muted) !important;
-}
-
-/* Métricas */
-[data-testid="stMetric"] {
-    background: var(--primary) !important;
-    border: 1px solid var(--border) !important;
-    border-top: 4px solid var(--accent) !important;
-    border-radius: 8px !important;
-    padding: 1.25rem 1.5rem !important;
-    box-shadow: 0 10px 24px rgba(120,189,242,0.14) !important;
-    transition: transform 0.16s ease, box-shadow 0.16s ease !important;
-    position: relative !important;
-}
-[data-testid="stMetric"]:hover {
-    transform: translateY(-3px) !important;
-    box-shadow: 0 12px 28px rgba(120,189,242,0.20) !important;
-}
-[data-testid="stMetric"]::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 2px;
-    background: var(--accent);
-    opacity: 1;
-}
-[data-testid="stMetricLabel"] {
-    font-family: var(--mono) !important;
-    font-size: 0.68rem !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.1em !important;
-    color: var(--muted) !important;
-}
-[data-testid="stMetricValue"] {
-    font-family: var(--mono) !important;
-    font-size: 2.45rem !important;
-    color: var(--text) !important;
-}
-
-/* Tabs */
-[data-testid="stTabs"] [role="tablist"] {
-    border-bottom: 1px solid var(--border) !important;
-    gap: 0.4rem !important;
-    padding: 0.3rem 0 !important;
-}
-[data-testid="stTabs"] button {
-    font-family: var(--mono) !important;
-    font-size: 0.7rem !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.08em !important;
-    color: var(--text) !important;
-    border: 1px solid transparent !important;
-    background: var(--secondary) !important;
-    border-radius: 8px !important;
-    padding: 0.58rem 1.05rem !important;
-}
-[data-testid="stTabs"] button[aria-selected="true"] {
-    color: #ffffff !important;
-    background: var(--tertiary) !important;
-    border-color: var(--tertiary) !important;
-    box-shadow: 0 10px 20px rgba(37,99,235,0.20) !important;
-}
-[data-testid="stTabsContent"] {
-    padding-top: 1.5rem !important;
-}
-
-/* Inputs */
-[data-testid="stTextInput"] input,
-[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-[data-testid="stTimeInput"] input,
-[data-testid="stDateInput"] input {
-    background: #ffffff !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 8px !important;
-    color: var(--text) !important;
-    font-family: var(--sans) !important;
-    font-size: 0.875rem !important;
-}
-[data-testid="stTextInput"] input:focus,
-[data-testid="stSelectbox"] div[data-baseweb="select"] > div:focus-within {
-    border-color: var(--accent) !important;
-    box-shadow: 0 0 0 4px rgba(120,189,242,0.22) !important;
-}
-[data-testid="stTextInput"] label,
-[data-testid="stSelectbox"] label,
-[data-testid="stTimeInput"] label,
-[data-testid="stDateInput"] label,
-[data-testid="stMultiSelect"] label {
-    font-family: var(--mono) !important;
-    font-size: 0.68rem !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.06em !important;
-    color: var(--muted) !important;
-    margin-bottom: 0.25rem !important;
-}
-
-/* Sliders */
-[data-testid="stSlider"] {
-    padding: 0.25rem 0 !important;
-}
-[data-testid="stSlider"] input[type="range"] {
-    opacity: 1 !important;
-    visibility: visible !important;
-    display: block !important;
-}
-[data-testid="stSlider"] [role="slider"] {
-    opacity: 1 !important;
-    visibility: visible !important;
-    background: var(--tertiary) !important;
-    border: 2px solid #ffffff !important;
-    box-shadow: 0 0 0 4px rgba(37,99,235,0.18) !important;
-}
-[data-testid="stSlider"] [data-baseweb="slider"] {
-    background: #dbeafe !important;
-    border-radius: 999px !important;
-}
-[data-testid="stSlider"] [data-baseweb="slider"] > div {
-    background: var(--tertiary) !important;
-    border-radius: 999px !important;
-}
-
-/* Botón principal */
-[data-testid="stFormSubmitButton"] button,
-.stButton button {
-    background: var(--tertiary) !important;
-    color: #ffffff !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-family: var(--mono) !important;
-    font-size: 0.72rem !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.08em !important;
-    padding: 0.72rem 1.5rem !important;
-    transition: background 0.15s, box-shadow 0.15s, transform 0.1s !important;
-    box-shadow: 0 10px 20px rgba(37,99,235,0.18) !important;
-    position: relative !important;
-    overflow: hidden !important;
-}
-[data-testid="stFormSubmitButton"] button *,
-.stButton button * {
-    color: #ffffff !important;
-    fill: #ffffff !important;
-}
-[data-testid="stFormSubmitButton"] button:hover,
-.stButton button:hover {
-    background: #1d4ed8 !important;
-    transform: translateY(-2px) !important;
-    box-shadow: 0 14px 26px rgba(37,99,235,0.24) !important;
-}
-[data-testid="stFormSubmitButton"] button:active,
-.stButton button:active {
-    transform: translateY(0) !important;
-}
-
-/* Dataframe */
-[data-testid="stDataFrame"] {
-    border: 1px solid var(--border) !important;
-    border-radius: 8px !important;
-    overflow: hidden !important;
-    box-shadow: 0 6px 16px rgba(120,189,242,0.12) !important;
-    background: #ffffff !important;
-}
-[data-testid="stDataFrame"] * {
-    color: var(--text) !important;
-}
-[data-testid="stDataFrame"] [role="gridcell"],
-[data-testid="stDataFrame"] [role="columnheader"] {
-    background: #ffffff !important;
-    border-color: #e5e7eb !important;
-}
-[data-testid="stTable"] * {
-    color: var(--text) !important;
-    background: #ffffff !important;
-}
-
-/* Alerts */
-[data-testid="stAlert"] {
-    border-radius: 5px !important;
-    font-family: var(--sans) !important;
-    font-size: 0.85rem !important;
-    border-left: 3px solid var(--danger) !important;
-}
-
-/* Multiselect chips */
-[data-testid="stMultiSelect"] span[data-baseweb="tag"] {
-    background: var(--secondary) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 6px !important;
-    color: var(--accent) !important;
-    font-family: var(--mono) !important;
-    font-size: 0.68rem !important;
-}
-
-/* Form container */
-[data-testid="stForm"] {
-    background: var(--primary) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 8px !important;
-    padding: 1.5rem !important;
-    box-shadow: 0 14px 30px rgba(120,189,242,0.14) !important;
-    backdrop-filter: blur(2px) !important;
-}
-
-/* Elegant micro accents */
-.stCaption code {
-    background: var(--secondary) !important;
-    color: var(--text) !important;
-    border: 1px solid var(--border) !important;
-    border-radius: 999px !important;
-    padding: 0.08rem 0.45rem !important;
-}
-
-[data-testid="stAlert"] {
-    box-shadow: 0 8px 18px rgba(120,189,242,0.12) !important;
-}
-
-/* Divider */
-hr { border-color: var(--border) !important; }
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #b0b7c3; }
-</style>
-""".replace("__BG_IMAGE__", background_image_b64), unsafe_allow_html=True)
 
 
 # ── Constantes ─────────────────────────────────────────────────────────────────
 WORKER_COLLECTION = "trabajador"
 STORE_COLLECTION = "tienda"
 ATTENDANCE_COLLECTION = "asistencia"
-QR_ACTIVE_COLLECTION = "qr_activos"
+QR_ACTIVE_COLLECTION = "qr"
 MONTH_NAMES = (
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 )
 WEEK_DAYS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado")
+WEEKDAY_NAMES = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
 SCHEDULE_FIELDS = ("hora_inicio", "inicio_receso", "final_receso", "hora_final")
 HIDDEN_FIELDS = ("password", "contrasena", "contraseña")
 SECRET_JSON_PATHS = (
     Path(".streamlit/secrets.toml"),
     Path(".streamlit/secret.toml"),
-    Path(".streamlit/firebase-service-account.json"),
 )
 
 
@@ -476,6 +119,16 @@ def normalize_email(email):
 def format_time(value):
     if not value:
         return ""
+    if isinstance(value, str):
+        text = value.strip()
+        if "T" in text:
+            try:
+                return datetime.fromisoformat(text.replace("Z", "+00:00")).strftime("%H:%M")
+            except ValueError:
+                pass
+        return text[:5] if len(text) >= 5 and text[2] == ":" else text
+    if isinstance(value, datetime):
+        return value.strftime("%H:%M")
     return value.strftime("%H:%M")
 
 
@@ -520,164 +173,51 @@ def path_value_after(path_parts, collection_names):
     return ""
 
 
-def build_attendance_row(doc, data):
-    path_parts = doc.reference.path.split("/")
-    fecha = (
-        first_present(data, "fecha", "date", "dia", "fecha_dia")
-        or path_value_after(path_parts, ("dias", "dia"))
-        or doc.id
-    )
+def build_attendance_row(doc, data=None):
+    if isinstance(doc, dict) and data is None:
+        data = doc
+    data = data or {}
+    fecha = str(data.get("fecha") or "")
     parsed_date = parse_iso_date(fecha)
-    id_trabajador = first_present(
-        data,
-        "id_trabajador",
-        "trabajador_id",
-        "idTrabajador",
-        "worker_id",
-    ) or path_value_after(path_parts, ("trabajadores", "trabajador"))
-    id_tienda = first_present(
-        data,
-        "id_tienda",
-        "tienda_id",
-        "idTienda",
-        "store_id",
-    ) or path_value_after(path_parts, ("tiendas", "tienda"))
-    id_sede = first_present(
-        data,
-        "id_sede",
-        "sede_id",
-        "idSede",
-    ) or path_value_after(path_parts, ("asistencias", "sedes", "sede"))
-
-    entrada = data.get("entrada") if isinstance(data.get("entrada"), dict) else {}
-    salida = data.get("salida") if isinstance(data.get("salida"), dict) else {}
-    horario = data.get("horario") if isinstance(data.get("horario"), dict) else {}
-
     return {
-        "doc_id": doc.id,
-        "ruta": doc.reference.path,
+        "doc_id": str(data.get("id_asistencia") or data.get("doc_id") or "").strip(),
+        "ruta": str(data.get("id_asistencia") or data.get("doc_id") or "").strip(),
         "fecha": fecha,
         "fecha_orden": parsed_date.isoformat() if parsed_date else "",
-        "nombre_tienda": (
-            first_present(data, "nombre_tienda", "tienda", "store_name")
-            or entrada.get("nombre_tienda")
-            or salida.get("nombre_tienda")
-            or id_tienda
-        ),
-        "id_tienda": id_tienda or entrada.get("id_tienda") or salida.get("id_tienda"),
-        "id_trabajador": id_trabajador,
-        "nombre_trabajador": first_present(
-            data,
-            "nombre_trabajador",
-            "trabajador",
-            "nombre",
-            "worker_name",
-        ),
-        "dni": first_present(data, "dni", "documento"),
-        "hora_inicio": (
-            first_present(data, "hora_inicio", "horaEntrada")
-            or entrada.get("hora")
-            or horario.get("hora_inicio")
-        ),
-        "inicio_receso": first_present(data, "inicio_receso", "inicioReceso"),
-        "final_receso": first_present(data, "final_receso", "finalReceso"),
-        "hora_final": (
-            first_present(data, "hora_final", "hora_finalhas", "horaSalida")
-            or salida.get("hora")
-            or horario.get("hora_final")
-        ),
+        "nombre_tienda": data.get("nombre_tienda", ""),
+        "id_tienda": data.get("id_tienda", ""),
+        "id_trabajador": data.get("dni_trabajador", ""),
+        "nombre_trabajador": data.get("nombre_trabajador", ""),
+        "dni": data.get("dni_trabajador", ""),
+        "hora_inicio": format_time(data.get("horario_entrada")),
+        "inicio_receso": format_time(data.get("horario_inicio_receso")),
+        "final_receso": format_time(data.get("horario_fin_receso")),
+        "hora_final": format_time(data.get("horario_salida")),
         "ultima_marca": (
-            first_present(data, "ultima_marca", "ultimaMarca", "estado")
-            or salida.get("estado")
-            or map_value(data, "refrigerio_fin", "estado")
-            or map_value(data, "refrigerio_inicio", "estado")
-            or entrada.get("estado")
+            "hora_final"
+            if data.get("horario_salida")
+            else "final_receso" if data.get("horario_fin_receso")
+            else "inicio_receso" if data.get("horario_inicio_receso")
+            else "hora_inicio" if data.get("horario_entrada")
+            else ""
         ),
-        "id_sede": id_sede,
-        "nombre_sede": (
-            first_present(data, "nombre_sede", "sede")
-            or entrada.get("nombre_sede")
-            or salida.get("nombre_sede")
-            or id_sede
-        ),
-        "horario_programado": (
-            f"{horario.get('hora_inicio', '')} - {horario.get('hora_final', '')}"
-            if horario else ""
-        ),
+        "id_sede": data.get("id_tienda", ""),
+        "nombre_sede": data.get("nombre_tienda", ""),
+        "horario_programado": "",
     }
 
 
-def stream_attendance_sources(db):
-    seen_paths = set()
-
-    for doc in db.collection(ATTENDANCE_COLLECTION).limit(250).stream():
-        seen_paths.add(doc.reference.path)
-        yield doc
-
-    for collection_name in ("dias", "asistencias", "asistencia"):
-        try:
-            docs = db.collection_group(collection_name).stream()
-            for doc in docs:
-                if doc.reference.path in seen_paths:
-                    continue
-                seen_paths.add(doc.reference.path)
-                yield doc
-        except Exception:
-            continue
-
-
 @st.cache_resource(show_spinner=False)
-def get_firestore_client():
-    service_account = load_service_account()
-    project_id = service_account.get("project_id")
-
-    if firebase_admin._apps:
-        current_app = firebase_admin.get_app()
-        if current_app.project_id != project_id:
-            firebase_admin.delete_app(current_app)
-        else:
-            return firestore.client()
-
-    if firebase_admin._apps:
-        return firestore.client()
-
-    cred = credentials.Certificate(service_account)
-    firebase_admin.initialize_app(cred)
-    return firestore.client()
+def get_database_client():
+    return get_connection()
 
 
 def load_service_account():
-    try:
-        for key in ["firebase", "firebase_service_account", "google_service_account"]:
-            if key in st.secrets:
-                return clean_service_account(dict(st.secrets[key]))
-    except Exception:
-        pass
-
-    for json_path in SECRET_JSON_PATHS:
-        if json_path.exists():
-            return load_service_account_file(json_path)
-
-    st.error(
-        "No encontré credenciales de Firebase. Coloca el JSON en "
-        "`.streamlit/secrets.toml` o `.streamlit/firebase-service-account.json`."
-    )
-    st.stop()
+    return {}
 
 
 def load_service_account_file(path):
-    raw_content = path.read_text(encoding="utf-8-sig").strip()
-    if raw_content.startswith("{"):
-        service_account, _ = json.JSONDecoder().raw_decode(raw_content)
-        return clean_service_account(service_account)
-    parsed = tomllib.loads(raw_content)
-    for key in ["firebase", "firebase_service_account", "google_service_account"]:
-        if key in parsed:
-            return clean_service_account(dict(parsed[key]))
-    if "type" in parsed and "project_id" in parsed:
-        return clean_service_account(parsed)
-    st.error(f"No pude leer credenciales válidas desde `{path}`.")
-    st.stop()
+    return {}
 
 
 def required_missing(fields):
@@ -685,34 +225,21 @@ def required_missing(fields):
 
 
 def document_exists(collection_name, document_id):
-    db = get_firestore_client()
-    return db.collection(collection_name).document(document_id).get().exists
+    return backend_document_exists(collection_name, document_id)
 
 
 def create_document(collection_name, document_id, data):
-    db = get_firestore_client()
-    db.collection(collection_name).document(document_id).set(data)
+    upsert_document(collection_name, document_id, data)
     st.cache_data.clear()
 
 
 def create_store_with_qr(document_id, store_data):
-    db = get_firestore_client()
-    qr_token = uuid4().hex
-    qr_data = {
-        "id_tienda": store_data["id_tienda"],
-        "nombre_tienda": store_data["nombre_tienda"],
-        "id_sede": store_data["id_sede"],
-        "nombre_sede": store_data["nombre_sede"],
-        "direccion": store_data["direccion"],
-        "token": qr_token,
-        "activo": True,
-        "fecha_creada": firestore.SERVER_TIMESTAMP,
-    }
-
-    batch = db.batch()
-    batch.set(db.collection(STORE_COLLECTION).document(document_id), store_data)
-    batch.set(db.collection(QR_ACTIVE_COLLECTION).document(document_id), qr_data)
-    batch.commit()
+    qr_token = backend_create_store_with_qr(
+        STORE_COLLECTION,
+        QR_ACTIVE_COLLECTION,
+        document_id,
+        store_data,
+    )
     st.cache_data.clear()
     return qr_token
 
@@ -720,54 +247,99 @@ def create_store_with_qr(document_id, store_data):
 # ── Queries cacheadas ──────────────────────────────────────────────────────────
 @st.cache_data(ttl=10, show_spinner=False)
 def get_tiendas():
-    db = get_firestore_client()
-    docs = db.collection(STORE_COLLECTION).stream()
+    docs = fetch_rows(STORE_COLLECTION, order_by=("nombre", False))
     tiendas = []
-    for doc in docs:
-        data = doc.to_dict()
+    for data in docs:
         tiendas.append({
-            "doc_id": doc.id,
-            "id_tienda": data.get("id_tienda", doc.id),
+            "doc_id": data.get("id_tienda", ""),
+            "id_tienda": data.get("id_tienda", ""),
             "correo": data.get("correo", ""),
-            "tiene_contrasena": bool(data.get("password") or data.get("contrasena")),
-            "nombre_tienda": data.get("nombre_tienda", ""),
-            "id_sede": data.get("id_sede", ""),
-            "nombre_sede": data.get("nombre_sede", ""),
+            "tiene_contrasena": bool(data.get("contrasena")),
+            "nombre_tienda": data.get("nombre", ""),
+            "id_sede": data.get("id_tienda", ""),
+            "nombre_sede": data.get("nombre", ""),
             "direccion": data.get("direccion", ""),
+            "telefono": data.get("telefono", ""),
+            "fecha_apertura": data.get("fecha_apertura", ""),
+            "estado": data.get("estado", True),
         })
     return sorted(tiendas, key=lambda x: x["nombre_tienda"])
 
 
 @st.cache_data(ttl=10, show_spinner=False)
 def get_trabajadores():
-    db = get_firestore_client()
-    docs = db.collection(WORKER_COLLECTION).stream()
+    docs = fetch_rows(WORKER_COLLECTION, order_by=("nombre", False))
+    tiendas = {row["id_tienda"]: row for row in get_tiendas()}
+    horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
+    schedule_map = {}
+    for row in horarios:
+        schedule_map.setdefault(row.get("dni_trabajador", ""), {})[row.get("dia_semana", "")] = row
     trabajadores = []
-    for doc in docs:
-        data = doc.to_dict()
+    for data in docs:
+        tienda = tiendas.get(data.get("id_tienda", ""), {})
+        horario = schedule_map.get(data.get("dni", ""), {})
         trabajadores.append({
-            "doc_id": doc.id,
-            "id_trabajador": data.get("id_trabajador", doc.id),
+            "doc_id": data.get("dni", ""),
+            "id_trabajador": data.get("dni", ""),
             "correo": data.get("correo", ""),
-            "tiene_contrasena": bool(data.get("password") or data.get("contrasena")),
-            "area": data.get("area", ""),
+            "tiene_contrasena": bool(data.get("contrasena")),
+            "area": data.get("cargo", ""),
+            "sueldo": data.get("sueldo", ""),
             "dni": data.get("dni", ""),
-            "id_sede": data.get("id_sede", ""),
-            "nombre_sede": data.get("nombre_sede", ""),
-            "nombre_trabajador": data.get("nombre_trabajador", ""),
-            "cuenta_bancaria": data.get("cuenta_bancaria", ""),
-            "dias_horario": ", ".join((data.get("horario") or {}).keys()),
+            "id_sede": data.get("id_tienda", ""),
+            "nombre_sede": tienda.get("nombre_tienda", ""),
+            "nombre_trabajador": data.get("nombre", ""),
+            "cuenta_bancaria": "",
+            "csi": data.get("csi", ""),
+            "telefono": data.get("telefono", ""),
+            "foto_dni": data.get("foto_dni", ""),
+            "dias_horario": list(horario.keys()),
+            "dias_horario_texto": ", ".join(horario.keys()),
+            "horario": horario,
+            "estado": bool(data.get("estado", True)),
         })
     return sorted(trabajadores, key=lambda x: x["nombre_trabajador"])
 
 
 @st.cache_data(ttl=10, show_spinner=False)
-def get_asistencias():
-    db = get_firestore_client()
-    asistencias = []
+def get_horarios_trabajador():
+    horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
+    trabajadores = {row["dni"]: row for row in get_trabajadores()}
+    tiendas = {row["id_tienda"]: row for row in get_tiendas()}
+    rows = []
+    for item in horarios:
+        worker = trabajadores.get(item.get("dni_trabajador", ""), {})
+        tienda = tiendas.get(worker.get("id_sede", ""), {})
+        rows.append({
+            "dni_trabajador": item.get("dni_trabajador", ""),
+            "nombre_trabajador": worker.get("nombre_trabajador", ""),
+            "id_tienda": worker.get("id_sede", ""),
+            "nombre_tienda": tienda.get("nombre_tienda", ""),
+            "dia_semana": item.get("dia_semana", ""),
+            "horario_entrada": format_time(item.get("horario_entrada")),
+            "horario_inicio_receso": format_time(item.get("horario_inicio_receso")),
+            "horario_fin_receso": format_time(item.get("horario_fin_receso")),
+            "horario_salida": format_time(item.get("horario_salida")),
+        })
+    return rows
 
-    for doc in stream_attendance_sources(db):
-        asistencias.append(build_attendance_row(doc, doc.to_dict() or {}))
+
+@st.cache_data(ttl=10, show_spinner=False)
+def get_asistencias():
+    docs = fetch_rows(ATTENDANCE_COLLECTION, order_by=(("fecha", True), ("id_asistencia", True)))
+    trabajadores = {row["dni"]: row for row in get_trabajadores()}
+    tiendas = {row["id_tienda"]: row for row in get_tiendas()}
+    asistencias = []
+    for data in docs:
+        row = build_attendance_row(data, data)
+        worker = trabajadores.get(row.get("dni", ""), {})
+        if worker:
+            row["nombre_trabajador"] = worker.get("nombre_trabajador", "")
+            row["id_tienda"] = worker.get("id_sede", "")
+            row["nombre_sede"] = worker.get("nombre_sede", "")
+            tienda = tiendas.get(worker.get("id_sede", ""), {})
+            row["nombre_tienda"] = tienda.get("nombre_tienda", row.get("nombre_sede", ""))
+        asistencias.append(row)
 
     unique_rows = {item["ruta"]: item for item in asistencias}
     return sorted(
@@ -779,21 +351,12 @@ def get_asistencias():
 
 @st.cache_data(ttl=10, show_spinner=False)
 def get_asistencias_trabajador(id_trabajador):
-    db = get_firestore_client()
-    asistencias = []
-
-    docs = (
-        db.collection(ATTENDANCE_COLLECTION)
-        .where("id_trabajador", "==", id_trabajador)
-        .stream()
+    docs = fetch_rows(
+        ATTENDANCE_COLLECTION,
+        filters=[("dni_trabajador", "eq", id_trabajador)],
+        order_by=(("fecha", True), ("id_asistencia", True)),
     )
-    for doc in docs:
-        asistencias.append(build_attendance_row(doc, doc.to_dict() or {}))
-
-    for doc in stream_attendance_sources(db):
-        row = build_attendance_row(doc, doc.to_dict() or {})
-        if str(row["id_trabajador"]) == str(id_trabajador):
-            asistencias.append(row)
+    asistencias = [build_attendance_row(data, data) for data in docs]
 
     unique_rows = {item["ruta"]: item for item in asistencias}
     return sorted(unique_rows.values(), key=lambda x: x["fecha_orden"], reverse=True)
@@ -817,7 +380,25 @@ def badge(text, color="var(--text)"):
     return f'<span style="background:var(--secondary);color:{color};border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-family:Space Mono,monospace;font-size:0.65rem;letter-spacing:0.06em;">{text}</span>'
 
 
-def build_schedule_inputs(selected_days):
+def _parse_time_value(value):
+    if not value:
+        return None
+    if isinstance(value, time):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    if " " in text:
+        text = text.split(" ", 1)[1]
+    if "T" in text:
+        text = text.split("T", 1)[-1]
+    try:
+        return time.fromisoformat(text[:8])
+    except ValueError:
+        return None
+
+
+def build_schedule_inputs(selected_days, key_prefix="schedule", initial_schedule=None):
     if not selected_days:
         return {}
 
@@ -838,28 +419,69 @@ def build_schedule_inputs(selected_days):
     for day in selected_days:
         cols = st.columns([1.2, 1, 1, 1, 1])
         cols[0].markdown(f'<span style="font-family:Space Mono,monospace;font-size:0.78rem;color:var(--text);">{day.capitalize()}</span>', unsafe_allow_html=True)
+        day_initial = (initial_schedule or {}).get(day, {})
         schedule[day] = {
-            "hora_inicio":    format_time(cols[1].time_input("Hora inicio",    key=f"{day}_hora_inicio",    label_visibility="collapsed")),
-            "inicio_receso":  format_time(cols[2].time_input("Inicio receso",  key=f"{day}_inicio_receso",  label_visibility="collapsed")),
-            "final_receso":   format_time(cols[3].time_input("Final receso",   key=f"{day}_final_receso",   label_visibility="collapsed")),
-            "hora_final":     format_time(cols[4].time_input("Hora final",     key=f"{day}_hora_final",     label_visibility="collapsed")),
+            "hora_inicio":    format_time(cols[1].time_input("Hora inicio",    value=_parse_time_value(day_initial.get("horario_entrada") or day_initial.get("hora_inicio")),    key=f"{key_prefix}_{day}_hora_inicio",    label_visibility="collapsed")),
+            "inicio_receso":  format_time(cols[2].time_input("Inicio receso",  value=_parse_time_value(day_initial.get("horario_inicio_receso") or day_initial.get("inicio_receso")),  key=f"{key_prefix}_{day}_inicio_receso",  label_visibility="collapsed")),
+            "final_receso":   format_time(cols[3].time_input("Final receso",   value=_parse_time_value(day_initial.get("horario_fin_receso") or day_initial.get("final_receso")),   key=f"{key_prefix}_{day}_final_receso",   label_visibility="collapsed")),
+            "hora_final":     format_time(cols[4].time_input("Hora final",     value=_parse_time_value(day_initial.get("horario_salida") or day_initial.get("hora_final")),     key=f"{key_prefix}_{day}_hora_final",     label_visibility="collapsed")),
         }
     return schedule
 
 
+def _combine_local_datetime(fecha_value, hora_value):
+    if not fecha_value or not hora_value:
+        return None
+    local_zone = ZoneInfo("America/Lima")
+    if isinstance(fecha_value, str):
+        fecha_obj = date.fromisoformat(fecha_value[:10])
+    else:
+        fecha_obj = fecha_value
+    if isinstance(hora_value, str):
+        hora_obj = time.fromisoformat(hora_value[:8])
+    else:
+        hora_obj = hora_value
+    combined = datetime.combine(fecha_obj, hora_obj)
+    return combined.replace(tzinfo=local_zone).isoformat()
+
+
+def save_worker_with_schedule(worker_data, selected_days, schedule):
+    if isinstance(worker_data, str):
+        worker_data = {"dni": worker_data}
+    dni = worker_data["dni"]
+    upsert_document(WORKER_COLLECTION, dni, worker_data, key_field="dni")
+    from supabase_backend import delete_rows, insert_document
+
+    delete_rows("horario_trabajador", [("dni_trabajador", "eq", dni)])
+    for day in selected_days:
+        day_schedule = schedule.get(day, {})
+        insert_document("horario_trabajador", {
+            "dni_trabajador": dni,
+            "dia_semana": day,
+            "horario_entrada": day_schedule.get("hora_inicio") or None,
+            "horario_inicio_receso": day_schedule.get("inicio_receso") or None,
+            "horario_fin_receso": day_schedule.get("final_receso") or None,
+            "horario_salida": day_schedule.get("hora_final") or None,
+        })
+
+
+def save_attendance_record(attendance_data):
+    from supabase_backend import insert_document
+    insert_document(ATTENDANCE_COLLECTION, attendance_data)
+
+
 # ── Formularios ────────────────────────────────────────────────────────────────
 def tienda_form():
-    section_header("Nueva tienda / sede", "Registra un punto de venta en el sistema")
+    section_header("Nueva tienda", "Registra una tienda en el sistema")
 
     with st.form("create_store_form", clear_on_submit=True):
         col_1, col_2 = st.columns(2)
-        id_tienda      = col_1.text_input("ID tienda *",            placeholder="tienda_001")
-        nombre_tienda  = col_1.text_input("Nombre tienda *",        placeholder="Tienda Centro")
-        id_sede        = col_1.text_input("ID sede *",              placeholder="sede_001")
-        correo         = col_2.text_input("Correo *",               placeholder="tienda@empresa.com")
-        password       = col_2.text_input("Contraseña del correo *", type="password")
-        nombre_sede    = col_2.text_input("Nombre sede *",          placeholder="Sede Lima Norte")
-        direccion      = col_2.text_input("Dirección *",            placeholder="Av. Principal 123")
+        nombre_tienda = col_1.text_input("Nombre tienda *", placeholder="Tienda Centro")
+        correo = col_1.text_input("Correo *", placeholder="tienda@empresa.com")
+        telefono = col_1.text_input("Teléfono", placeholder="+51 999 999 999")
+        direccion = col_2.text_input("Dirección", placeholder="Av. Principal 123")
+        fecha_apertura = col_2.date_input("Fecha apertura", value=None)
+        password = col_2.text_input("Contraseña *", type="password")
 
         submitted = st.form_submit_button("⬡  Registrar tienda", use_container_width=True)
 
@@ -867,83 +489,86 @@ def tienda_form():
         return
 
     missing = required_missing({
-        "ID tienda": id_tienda, "Correo": correo, "Contraseña": password,
-        "Nombre tienda": nombre_tienda, "ID sede": id_sede,
-        "Nombre sede": nombre_sede, "Dirección": direccion,
+        "Nombre tienda": nombre_tienda, "Correo": correo, "Contraseña": password,
     })
     if missing:
         st.error("Campos requeridos: " + ", ".join(missing))
         return
 
-    doc_id = normalize_doc_id(id_tienda)
-    if document_exists(STORE_COLLECTION, doc_id):
-        st.error(f"Ya existe una tienda con el ID `{doc_id}`.")
-        return
+    doc_id = str(uuid4())
 
     store_data = {
-        "id_tienda": id_tienda.strip(),
         "correo": normalize_email(correo),
-        "password": password, "contrasena": password,
-        "nombre_tienda": nombre_tienda.strip(),
-        "id_sede": id_sede.strip(),
-        "nombre_sede": nombre_sede.strip(),
+        "contrasena": hash_password(password),
+        "nombre": nombre_tienda.strip(),
+        "telefono": telefono.strip(),
         "direccion": direccion.strip(),
+        "fecha_apertura": fecha_apertura.isoformat() if fecha_apertura else None,
+        "estado": True,
     }
     qr_token = create_store_with_qr(doc_id, store_data)
     st.success(f"✓  Tienda registrada → `{STORE_COLLECTION}/{doc_id}`")
-    st.caption(f"QR activo creado: `{QR_ACTIVE_COLLECTION}/{doc_id}` - token `{qr_token}`")
+    st.caption(f"QR activo creado en `{QR_ACTIVE_COLLECTION}` - token `{qr_token}`")
 
 
 def trabajador_form():
-    section_header("Nuevo trabajador", "Crea el perfil de un colaborador con su horario")
+    section_header("Nuevo trabajador", "Crea el perfil y horario de un colaborador")
     tiendas = get_tiendas()
 
+    success_message = st.session_state.pop("worker_success_message", None)
+    if success_message:
+        st.success(success_message)
+
     if not tiendas:
-        st.warning("Primero registra al menos una tienda para asignar la sede.")
+        st.warning("Primero registra al menos una tienda.")
         return
 
     tienda_options = {
-        f"{t['nombre_tienda']}  ·  {t['nombre_sede']}": t for t in tiendas
+        f"{t['nombre_tienda']}  ·  {t['id_tienda']}": t for t in tiendas
     }
 
+    form_seed = int(st.session_state.get("worker_form_seed", 0))
     selected_days = st.multiselect(
         "Días laborables *",
         options=list(WEEK_DAYS),
         default=list(WEEK_DAYS),
         format_func=str.capitalize,
+        key=f"worker_days_{form_seed}",
     )
     if not selected_days:
         st.warning("Selecciona al menos un día para el horario.")
 
-    with st.form("create_worker_form", clear_on_submit=True):
+    with st.form(f"create_worker_form_{form_seed}", clear_on_submit=False):
         col_1, col_2 = st.columns(2)
-        id_trabajador     = col_1.text_input("ID trabajador *",       placeholder="trab_001")
-        nombre_trabajador = col_1.text_input("Nombre completo *",     placeholder="Juan Pérez")
-        dni               = col_1.text_input("DNI *",                 placeholder="12345678")
-        area              = col_1.text_input("Área *",                placeholder="Ventas")
-        correo            = col_2.text_input("Correo *",              placeholder="juan@empresa.com")
-        password          = col_2.text_input("Contraseña del correo *", type="password")
-        cuenta_bancaria   = col_2.text_input("Cuenta bancaria *",     placeholder="0011-0123-...")
-        foto_dni          = col_2.file_uploader(
+        dni = col_1.text_input("DNI *", placeholder="12345678", key=f"worker_dni_{form_seed}")
+        nombre = col_1.text_input("Nombre completo *", placeholder="Juan Pérez", key=f"worker_nombre_{form_seed}")
+        cargo = col_1.text_input("Cargo", placeholder="Ventas", key=f"worker_cargo_{form_seed}")
+        sueldo = col_1.number_input("Sueldo", min_value=0.0, step=50.0, format="%.2f", key=f"worker_sueldo_{form_seed}")
+        correo = col_2.text_input("Correo", placeholder="juan@empresa.com", key=f"worker_correo_{form_seed}")
+        password = col_2.text_input("Contraseña", type="password", key=f"worker_password_{form_seed}")
+        telefono = col_2.text_input("Teléfono", placeholder="+51 999 999 999", key=f"worker_telefono_{form_seed}")
+        csi = col_2.text_input("CSI / código interno", placeholder="CSI-001", key=f"worker_csi_{form_seed}")
+        foto_dni = col_2.file_uploader(
             "Foto DNI *",
             type=["jpg", "jpeg", "png", "pdf"],
+            key=f"worker_foto_{form_seed}",
         )
         tienda_label      = st.selectbox(
             "Tienda / sede asignada *",
             options=list(tienda_options.keys()),
-            index=None, placeholder="Selecciona una tienda",
+            index=None,
+            placeholder="Selecciona una tienda",
+            key=f"worker_tienda_{form_seed}",
         )
-        horario = build_schedule_inputs(selected_days)
+        horario = build_schedule_inputs(selected_days, key_prefix=f"worker_{form_seed}")
         submitted = st.form_submit_button("⬡  Registrar trabajador", use_container_width=True)
 
     if not submitted:
         return
 
     missing = required_missing({
-        "ID trabajador": id_trabajador, "Correo": correo, "Contraseña": password,
-        "Área": area, "DNI": dni, "Foto DNI": foto_dni,
-        "Tienda / sede": tienda_label, "Nombre": nombre_trabajador,
-        "Cuenta bancaria": cuenta_bancaria,
+        "DNI": dni, "Nombre": nombre, "Foto DNI": foto_dni,
+        "Tienda": tienda_label,
     })
     if not selected_days:
         missing.append("Días laborables")
@@ -952,7 +577,7 @@ def trabajador_form():
         st.error("Campos requeridos: " + ", ".join(missing))
         return
 
-    doc_id = normalize_doc_id(id_trabajador)
+    doc_id = str(dni).strip()
     if document_exists(WORKER_COLLECTION, doc_id):
         st.error(f"Ya existe un trabajador con el ID `{doc_id}`.")
         return
@@ -964,41 +589,50 @@ def trabajador_form():
         st.error(f"No se pudo subir el archivo a Cloudinary: {exc}")
         return
 
-    create_document(WORKER_COLLECTION, doc_id, {
-        "id_trabajador": id_trabajador.strip(),
+    worker_data = {
+        "dni": doc_id,
+        "id_tienda": tienda["id_tienda"],
         "correo": normalize_email(correo),
-        "password": password, "contrasena": password,
-        "area": area.strip(), "dni": dni.strip(),
+        "contrasena": hash_password(password),
+        "nombre": nombre.strip(),
+        "cargo": cargo.strip(),
+        "sueldo": float(sueldo) if sueldo is not None else None,
+        "telefono": telefono.strip(),
+        "csi": csi.strip(),
         "foto_dni": uploaded_dni["secure_url"],
-        "foto_dni_public_id": uploaded_dni["public_id"],
-        "foto_dni_asset_id": uploaded_dni["asset_id"],
-        "foto_dni_resource_type": uploaded_dni["resource_type"],
-        "foto_dni_nombre_archivo": uploaded_dni["name"],
-        "id_sede": tienda["id_sede"], "nombre_sede": tienda["nombre_sede"],
-        "nombre_trabajador": nombre_trabajador.strip(),
-        "cuenta_bancaria": cuenta_bancaria.strip(),
-        "fecha_creada": firestore.SERVER_TIMESTAMP,
-        "horario": horario,
-    })
-    st.success(f"✓  Trabajador registrado → `{WORKER_COLLECTION}/{doc_id}`")
+        "estado": True,
+    }
+    create_document(WORKER_COLLECTION, doc_id, worker_data)
+    from supabase_backend import delete_rows, insert_document
+    delete_rows("horario_trabajador", [("dni_trabajador", "eq", doc_id)])
+    for day in selected_days:
+        schedule_item = horario.get(day, {})
+        insert_document("horario_trabajador", {
+            "dni_trabajador": doc_id,
+            "dia_semana": day,
+            "horario_entrada": schedule_item.get("hora_inicio") or None,
+            "horario_inicio_receso": schedule_item.get("inicio_receso") or None,
+            "horario_fin_receso": schedule_item.get("final_receso") or None,
+            "horario_salida": schedule_item.get("hora_final") or None,
+        })
+    st.session_state["worker_success_message"] = f"✓  Trabajador registrado → `{WORKER_COLLECTION}/{doc_id}`"
+    st.session_state["worker_form_seed"] = form_seed + 1
+    st.rerun()
 
 
 def asistencia_form():
-    section_header("Nueva asistencia", "Registra o corrige una marca de asistencia manualmente")
-    tiendas     = get_tiendas()
+    section_header("Nueva asistencia", "Registra o corrige una marca manualmente")
     trabajadores = get_trabajadores()
 
-    if not tiendas or not trabajadores:
-        st.warning("Necesitas al menos una tienda y un trabajador registrados.")
+    if not trabajadores:
+        st.warning("Necesitas al menos un trabajador registrado.")
         return
 
-    tienda_options = {f"{t['nombre_tienda']}  ·  {t['id_tienda']}": t for t in tiendas}
     worker_options = {f"{w['nombre_trabajador']}  ·  {w['dni']}": w for w in trabajadores}
 
     with st.form("create_attendance_form", clear_on_submit=True):
         col_1, col_2 = st.columns(2)
-        tienda_label  = col_1.selectbox("Tienda *",     options=list(tienda_options.keys()), index=None, placeholder="Selecciona una tienda")
-        worker_label  = col_2.selectbox("Trabajador *", options=list(worker_options.keys()), index=None, placeholder="Selecciona un trabajador")
+        worker_label  = col_1.selectbox("Trabajador *", options=list(worker_options.keys()), index=None, placeholder="Selecciona un trabajador")
         fecha         = col_1.date_input("Fecha *")
 
         st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
@@ -1020,35 +654,27 @@ def asistencia_form():
         return
 
     missing = required_missing({
-        "Tienda": tienda_label, "Trabajador": worker_label,
-        "Fecha": fecha, "Entrada": hora_inicio,
-        "Ini. receso": inicio_receso, "Fin receso": final_receso,
-        "Salida": hora_final, "Última marca": ultima_marca,
+        "Trabajador": worker_label,
+        "Fecha": fecha,
+        "Entrada": hora_inicio,
+        "Ini. receso": inicio_receso,
+        "Fin receso": final_receso,
+        "Salida": hora_final,
     })
     if missing:
         st.error("Campos requeridos: " + ", ".join(missing))
         return
 
-    tienda    = tienda_options[tienda_label]
     trabajador = worker_options[worker_label]
-    doc_id = normalize_doc_id(
-        f"{trabajador['id_trabajador']}_{fecha.isoformat()}_{tienda['id_tienda']}"
-    )
-    create_document(ATTENDANCE_COLLECTION, doc_id, {
-        "nombre_tienda":  tienda["nombre_tienda"],
-        "id_tienda":      tienda["id_tienda"],
-        "id_trabajador":  trabajador["id_trabajador"],
-        "fecha":          fecha.isoformat(),
-        "hora_inicio":    format_time(hora_inicio),
-        "inicio_receso":  format_time(inicio_receso),
-        "final_receso":   format_time(final_receso),
-        "hora_finalhas":  format_time(hora_final),
-        "ultima_marca":   ultima_marca,
-        "id_sede":        tienda["id_sede"],
-        "nombre_sede":    tienda["nombre_sede"],
-        "dni":            trabajador["dni"],
+    create_document(ATTENDANCE_COLLECTION, str(uuid4()), {
+        "dni_trabajador": trabajador["dni"],
+        "fecha": fecha.isoformat(),
+        "horario_entrada": _combine_local_datetime(fecha, hora_inicio),
+        "horario_inicio_receso": _combine_local_datetime(fecha, inicio_receso),
+        "horario_fin_receso": _combine_local_datetime(fecha, final_receso),
+        "horario_salida": _combine_local_datetime(fecha, hora_final),
     })
-    st.success(f"✓  Asistencia registrada → `{ATTENDANCE_COLLECTION}/{doc_id}`")
+    st.success(f"✓  Asistencia registrada → `{ATTENDANCE_COLLECTION}`")
 
 
 # ── Vista general ──────────────────────────────────────────────────────────────
@@ -1133,14 +759,14 @@ def overview():
     tab_t, tab_w, tab_a = st.tabs(["Tiendas", "Trabajadores", "Asistencias"])
 
     with tab_t:
-        st.caption(f"colección Firebase: `{STORE_COLLECTION}`")
+        st.caption(f"tabla PostgreSQL: `{STORE_COLLECTION}`")
         if tiendas:
             st.dataframe(tiendas, use_container_width=True, hide_index=True)
         else:
             st.info("Todavía no hay tiendas registradas.")
 
     with tab_w:
-        st.caption(f"colección Firebase: `{WORKER_COLLECTION}`")
+        st.caption(f"tabla PostgreSQL: `{WORKER_COLLECTION}`")
         if trabajadores:
             st.dataframe(trabajadores, use_container_width=True, hide_index=True)
             worker_options = {
@@ -1162,7 +788,7 @@ def overview():
             st.info("Todavía no hay trabajadores registrados.")
 
     with tab_a:
-        st.caption(f"colección Firebase: `{ATTENDANCE_COLLECTION}`  ·  últimos 30 registros")
+        st.caption(f"tabla PostgreSQL: `{ATTENDANCE_COLLECTION}`  ·  últimos 30 registros")
         if asistencias:
             st.dataframe(asistencias, use_container_width=True, hide_index=True)
         else:
@@ -1179,17 +805,23 @@ def build_section_context():
         build_schedule_inputs=build_schedule_inputs,
         create_document=create_document,
         create_store_with_qr=create_store_with_qr,
+        delete_document=delete_document,
         document_exists=document_exists,
-        firestore=firestore,
         format_time=format_time,
         get_asistencias=get_asistencias,
+        get_horarios_trabajador=get_horarios_trabajador,
         get_tiendas=get_tiendas,
         get_trabajadores=get_trabajadores,
         normalize_doc_id=normalize_doc_id,
         normalize_email=normalize_email,
+        hash_password=hash_password,
+        server_timestamp=server_timestamp,
         required_missing=required_missing,
         section_header=section_header,
         upload_worker_file=upload_worker_file,
+        save_worker_schedule=save_worker_with_schedule,
+        save_attendance_record=save_attendance_record,
+        update_document=update_document,
         worker_attendance_dialog=worker_attendance_dialog,
     )
 
@@ -1197,7 +829,7 @@ def build_section_context():
 # ── Página principal ───────────────────────────────────────────────────────────
 def admin_page():
     pages = {
-        "Resumen": render_overview,
+        "Asistencias": render_resumen,
         "Tiendas": render_tiendas,
         "Trabajadores": render_trabajadores,
     }
@@ -1235,7 +867,7 @@ def admin_page():
                     </div>
                     <div style="font-size:0.79rem; color:#5f7182; font-family:'DM Sans',sans-serif;
                                 margin-top:0.24rem;">
-                        Sistema de Asistencia · Firebase Firestore
+                        Sistema de Asistencia · PostgreSQL
                     </div>
                 </div>
             </div>
@@ -1250,9 +882,10 @@ def admin_page():
     """.replace("{current_page}", current_page), unsafe_allow_html=True)
 
     try:
-        get_firestore_client()
+        connection = get_connection()
+        connection.close()
     except Exception as exc:
-        st.error(f"No se pudo conectar con Firebase: {exc}")
+        st.error(f"No se pudo conectar con PostgreSQL: {exc}")
         st.stop()
 
     pages[current_page](build_section_context())
