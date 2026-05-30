@@ -21,6 +21,7 @@ import streamlit as st
 from cloudinary_uploader import upload_worker_file
 from login import is_authenticated, render_login, logout
 from sections.asistencias_resumen import render_resumen
+from sections.salarios import render_salarios
 from sections.tiendas import render_tiendas
 from sections.trabajadores import render_trabajadores
 from supabase_backend import (
@@ -856,6 +857,7 @@ def build_section_context():
         document_exists=document_exists,
         format_time=format_time,
         get_asistencias=get_asistencias,
+        get_asistencias_trabajador=get_asistencias_trabajador,
         get_horarios_trabajador=get_horarios_trabajador,
         get_tiendas=get_tiendas,
         get_trabajadores=get_trabajadores,
@@ -877,6 +879,7 @@ def build_section_context():
 def admin_page():
     pages = {
         "Asistencias": render_resumen,
+        "Salarios": render_salarios,
         "Tiendas": render_tiendas,
         "Trabajadores": render_trabajadores,
     }

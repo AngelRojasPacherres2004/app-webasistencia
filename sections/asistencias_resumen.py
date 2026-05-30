@@ -17,15 +17,15 @@ def _week_start(current_date):
 
 def _week_label(start_date):
     end_date = start_date + timedelta(days=6)
-    return f"{start_date.strftime('%d/%m/%Y')}  →  {end_date.strftime('%d/%m/%Y')}"
+    return f"{start_date.strftime('%d/%m/%Y')} -> {end_date.strftime('%d/%m/%Y')}"
 
 
 def _cell_html(attendance_row):
     if not attendance_row:
-        return '<span class="m-empty">—</span>'
+        return '<span class="m-empty">-</span>'
 
-    entrada = attendance_row.get("hora_inicio") or "—"
-    salida = attendance_row.get("hora_final") or "—"
+    entrada = attendance_row.get("hora_inicio") or "-"
+    salida = attendance_row.get("hora_final") or "-"
     is_late = bool(attendance_row.get("late"))
     entrada_color = "#dc2626" if is_late else "#1d4ed8"
     return (
@@ -50,8 +50,8 @@ def _render_weekly_matrix(workers, attendance_map, days):
             f"""
             <tr>
               <td class="worker-td">
-                <div class="worker-name">{worker.get('nombre_trabajador', '—')}</div>
-                <div class="worker-meta">DNI {dni} · {worker.get('nombre_sede', '—')}</div>
+                <div class="worker-name">{worker.get('nombre_trabajador', '-')}</div>
+                <div class="worker-meta">DNI {dni} · {worker.get('nombre_sede', '-')}</div>
               </td>
               {''.join(day_cells)}
             </tr>
@@ -147,6 +147,47 @@ def render_resumen(api=None):
         tiendas = api.get_tiendas()
         horarios = api.get_horarios_trabajador()
 
+    store_options = {"Todas": None}
+    store_options.update({f"{store['nombre_tienda']} · {store['id_tienda']}": store for store in tiendas})
+
+    if "resumen_week" not in st.session_state:
+        all_dates = [_parse_date(row.get("fecha")) for row in asistencias if _parse_date(row.get("fecha"))]
+        st.session_state["resumen_week"] = max(all_dates) if all_dates else date.today()
+
+    current_start = _week_start(st.session_state["resumen_week"])
+    week_end = current_start + timedelta(days=6)
+    week_days = [current_start + timedelta(days=i) for i in range(7)]
+
+    sc1, sc2, sc3, sc4 = st.columns([2.4, 1.3, 0.9, 1.1])
+    search_query = sc1.text_input(
+        "Buscar", placeholder="Nombre, DNI o sede...", key="resumen_search", label_visibility="collapsed"
+    )
+    selected_store_label = sc2.selectbox(
+        "Tienda",
+        options=list(store_options.keys()),
+        index=0,
+        key="resumen_store_filter",
+        label_visibility="collapsed",
+    )
+    if sc3.button("Anterior", use_container_width=True):
+        st.session_state["resumen_week"] = current_start - timedelta(days=7)
+        st.rerun()
+    picked = sc4.date_input("Semana", value=current_start, key="resumen_picker", label_visibility="collapsed")
+    if picked != current_start:
+        st.session_state["resumen_week"] = picked
+        current_start = _week_start(picked)
+        week_end = current_start + timedelta(days=6)
+        week_days = [current_start + timedelta(days=i) for i in range(7)]
+
+    if selected_store_label != "Todas":
+        selected_store = store_options[selected_store_label]
+        trabajadores = [
+            worker for worker in trabajadores
+            if str(worker.get("id_sede", "")).strip() == str(selected_store["id_tienda"]).strip()
+        ]
+        worker_ids = {worker.get("dni", "") for worker in trabajadores}
+        asistencias = [row for row in asistencias if str(row.get("dni", "")).strip() in worker_ids]
+
     valid_dates = [_parse_date(row.get("fecha")) for row in asistencias if _parse_date(row.get("fecha"))]
 
     m1, m2, m3, m4 = st.columns(4)
@@ -155,48 +196,11 @@ def render_resumen(api=None):
     m3.metric("Registros", len(asistencias))
     m4.metric(
         "Rango de fechas",
-        f"{min(valid_dates).strftime('%d/%m')} – {max(valid_dates).strftime('%d/%m')}"
-        if valid_dates else "—",
+        f"{min(valid_dates).strftime('%d/%m')} - {max(valid_dates).strftime('%d/%m')}"
+        if valid_dates else "-",
     )
 
     st.markdown('<div style="height:1rem"></div>', unsafe_allow_html=True)
-
-    if "resumen_week" not in st.session_state:
-        st.session_state["resumen_week"] = max(valid_dates) if valid_dates else date.today()
-
-    current_start = _week_start(st.session_state["resumen_week"])
-    week_end = current_start + timedelta(days=6)
-    week_days = [current_start + timedelta(days=i) for i in range(7)]
-
-    st.markdown(
-        f"""
-        <div class="week-panel">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem;">
-            <div>
-              <div class="week-panel-title">Asistencias semanales</div>
-              <div class="week-panel-sub">Cada día muestra solo la hora de entrada y salida</div>
-            </div>
-            <span class="week-range-badge">{_week_label(current_start)}</span>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    sc1, sc2, sc3 = st.columns([3, 1, 1])
-    search_query = sc1.text_input(
-        "Buscar", placeholder="Nombre, DNI o sede…", key="resumen_search", label_visibility="collapsed"
-    )
-    if sc2.button("← Anterior", use_container_width=True):
-        st.session_state["resumen_week"] = current_start - timedelta(days=7)
-        st.rerun()
-    picked = sc3.date_input("Semana", value=current_start, key="resumen_picker", label_visibility="collapsed")
-    if picked != current_start:
-        st.session_state["resumen_week"] = picked
-        current_start = _week_start(picked)
-        week_end = current_start + timedelta(days=6)
-        week_days = [current_start + timedelta(days=i) for i in range(7)]
-
     st.caption(f"Semana: `{_week_label(current_start)}` · `{len(asistencias):,}` registros")
 
     attendance_map = {}
@@ -264,8 +268,9 @@ def render_resumen(api=None):
     c1.metric("Marcas en la semana", total_present)
     c2.metric("Faltas en la semana", max(total_possible - total_present, 0))
 
-    table_html = _render_weekly_matrix(filtered_workers, attendance_map, week_days)
-    if table_html:
-        components.html(table_html, height=max(320, 92 + (len(filtered_workers) * 88)), scrolling=True)
-    else:
+    if not filtered_workers:
         st.info("No hay trabajadores o asistencias para este rango.")
+        return
+
+    table_html = _render_weekly_matrix(filtered_workers, attendance_map, week_days)
+    components.html(table_html, height=max(320, 92 + (len(filtered_workers) * 88)), scrolling=True)
