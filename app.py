@@ -893,11 +893,12 @@ def admin_page():
 
     with st.sidebar:
         st.markdown("""
-        <div style="padding:0.35rem 0 1rem;">
-            <div style="font-family:'Space Mono',monospace;font-size:1.05rem;color:#1f2a37;">
+        <div style="position: relative; z-index: 2;">
+        <div style="padding:1rem 0 1.5rem;">
+            <div style="font-family:'Space Mono',monospace;font-size:1.1rem;color:#ffffff;font-weight:700;">
                 Admin Asistencia
             </div>
-            <div style="font-size:0.78rem;color:#5f7182;margin-top:0.2rem;">
+            <div style="font-size:0.78rem;color:#e0e0e0;margin-top:0.3rem;font-weight:500;">
                 Panel de RRHH
             </div>
         </div>
@@ -907,10 +908,14 @@ def admin_page():
             options=list(pages.keys()),
             label_visibility="collapsed",
         )
-        st.markdown('<div style="height:1rem"></div>', unsafe_allow_html=True)
-        if st.button("Cerrar sesión", use_container_width=True):
+
+        st.markdown('<div style="flex: 1;"></div>', unsafe_allow_html=True)
+
+        if st.button("↪ Cerrar sesión", use_container_width=True, key="logout_btn"):
             logout()
             st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # Apply background image to entire content area
     hero_banner_style = ""

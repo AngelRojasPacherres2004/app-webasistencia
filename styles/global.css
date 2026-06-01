@@ -40,7 +40,8 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
 [data-testid="stToolbar"] { display: none; }
 
 [data-testid="stSidebar"] {
-    display: block !important;
+    display: flex !important;
+    flex-direction: column !important;
     visibility: visible !important;
     opacity: 1 !important;
     transform: none !important;
@@ -49,11 +50,23 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     width: 20rem !important;
     min-width: 20rem !important;
     max-width: 20rem !important;
-    background: rgba(255, 255, 255, 0.7) !important;
-    backdrop-filter: blur(0px) !important;
-    border-right: 1px solid var(--border) !important;
-    box-shadow: 8px 0 30px rgba(120, 189, 242, 0.12) !important;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
+    backdrop-filter: blur(10px) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 8px 0 60px rgba(0, 0, 0, 0.5) !important;
     z-index: 20 !important;
+    padding-bottom: 0 !important;
+}
+
+[data-testid="stSidebar"] > div:first-child {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow-y: auto !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    flex: 1 !important;
 }
 
 [data-testid="stSidebar"] > div:first-child,
@@ -61,7 +74,7 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     width: 100% !important;
 }
 
-[data-testid="stSidebar"] > div:first-child { padding-top: 1.25rem; }
+[data-testid="stSidebar"] > div:first-child { padding-top: 0rem; padding-left: 1rem; padding-right: 1rem; }
 [data-testid="stSidebar"] [role="radiogroup"] { gap: 0.45rem; }
 
 [data-testid="stSidebar"] label,
@@ -70,16 +83,29 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
 }
 
 [data-testid="stSidebar"] label {
-    border: 1px solid var(--border);
-    background: var(--primary);
-    padding: 0.72rem 0.8rem;
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+    border: 1.5px solid rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.08);
+    padding: 0.9rem 1rem;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(20px);
+    border-radius: 12px;
+    margin-bottom: 0.6rem;
+    color: #ffffff;
+    font-weight: 500;
 }
 
 [data-testid="stSidebar"] label:hover {
-    background: var(--secondary);
-    border-color: var(--accent);
-    transform: translateX(2px);
+    background: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: translateX(4px);
+    box-shadow: 0 8px 24px rgba(255, 255, 255, 0.1);
+}
+
+[data-testid="stSidebar"] label:has(input:checked) {
+    background: linear-gradient(135deg, rgba(37, 99, 235, 1) 0%, rgba(29, 78, 216, 1) 100%) !important;
+    border-color: rgba(255, 255, 255, 0.4) !important;
+    color: #ffffff !important;
+    box-shadow: 0 12px 32px rgba(37, 99, 235, 0.6) !important;
 }
 
 [data-testid="stSidebar"] label:has(input:checked) {
@@ -270,7 +296,7 @@ p, [data-testid="stText"], small, label {
 }
 
 .stButton button {
-    background: var(--tertiary) !important;
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
     color: #fff !important;
     border: none !important;
     font-family: var(--mono) !important;
@@ -283,13 +309,15 @@ p, [data-testid="stText"], small, label {
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
-    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2) !important;
-    transition: background 0.15s, transform 0.1s !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25) !important;
+    transition: all 0.2s ease !important;
+    border-radius: 8px !important;
 }
 
 .stButton button:hover {
-    background: #1d4ed8 !important;
-    transform: translateY(-1px) !important;
+    background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35) !important;
 }
 
 .st-key-resumen_prev_button button {
@@ -413,3 +441,42 @@ p, [data-testid="stText"], small, label {
 ::-webkit-scrollbar-track { background: #f8fafc; }
 ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #b0b7c3; }
+
+/* Botón Cerrar Sesión - Estilo Premium */
+.st-key-logout_btn {
+    position: fixed !important;
+    bottom: 1.5rem !important;
+    left: 1rem !important;
+    right: auto !important;
+    width: 18rem !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    z-index: 21 !important;
+}
+
+.st-key-logout_btn button {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%) !important;
+    color: #fff !important;
+    border: 1px solid rgba(255, 107, 107, 0.3) !important;
+    font-family: var(--mono) !important;
+    font-size: 0.62rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    font-weight: 700 !important;
+    line-height: 1 !important;
+    padding: 0.7rem 1.2rem !important;
+    min-height: 2.6rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    box-shadow: 0 10px 30px rgba(255, 107, 107, 0.4) !important;
+    transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+    border-radius: 14px !important;
+}
+
+.st-key-logout_btn button:hover {
+    background: linear-gradient(135deg, #ee5a52 0%, #e63946 100%) !important;
+    transform: translateY(-4px) scale(1.02) !important;
+    box-shadow: 0 15px 40px rgba(255, 107, 107, 0.5) !important;
+    border-color: rgba(255, 107, 107, 0.6) !important;
+}
