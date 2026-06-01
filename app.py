@@ -889,6 +889,8 @@ def admin_page():
         "Trabajadores": render_trabajadores,
     }
 
+    st.markdown('<div class="admin-content-wrapper"></div>', unsafe_allow_html=True)
+
     with st.sidebar:
         st.markdown("""
         <div style="padding:0.35rem 0 1rem;">
@@ -910,6 +912,30 @@ def admin_page():
             logout()
             st.rerun()
 
+    # Apply background image to entire content area
+    hero_banner_style = ""
+    if background_image_b64:
+        hero_banner_style = f"""
+        <style>
+            html, body, [data-testid="stAppViewContainer"] {{
+                background-image: url('data:image/png;base64,{background_image_b64}') !important;
+                background-size: cover !important;
+                background-position: center !important;
+                background-repeat: no-repeat !important;
+                background-color: transparent !important;
+            }}
+            .main .block-container {{
+                background-image: url('data:image/png;base64,{background_image_b64}') !important;
+                background-size: cover !important;
+                background-position: center !important;
+                background-repeat: no-repeat !important;
+                background-color: transparent !important;
+            }}
+        </style>
+        """
+    
+    st.markdown(hero_banner_style, unsafe_allow_html=True)
+    
     st.markdown("""
     <div class="hero-banner">
         <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
