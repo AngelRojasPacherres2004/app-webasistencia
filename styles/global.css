@@ -260,10 +260,15 @@ p, [data-testid="stText"], small, label {
     color: #fff !important;
     border: none !important;
     font-family: var(--mono) !important;
-    font-size: 0.68rem !important;
+    font-size: 0.56rem !important;
     text-transform: uppercase !important;
-    letter-spacing: 0.07em !important;
-    padding: 0.55rem 1.1rem !important;
+    letter-spacing: 0.05em !important;
+    line-height: 1 !important;
+    padding: 0.36rem 0.78rem !important;
+    min-height: 2rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
     box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2) !important;
     transition: background 0.15s, transform 0.1s !important;
 }
@@ -271,6 +276,45 @@ p, [data-testid="stText"], small, label {
 .stButton button:hover {
     background: #1d4ed8 !important;
     transform: translateY(-1px) !important;
+}
+
+.st-key-resumen_prev_button button {
+    font-size: 0.58rem !important;
+    line-height: 1 !important;
+    padding: 0.42rem 0.75rem !important;
+    letter-spacing: 0.04em !important;
+}
+
+.st-key-resumen_prev_button button:hover {
+    transform: none !important;
+}
+
+.st-key-worker_new_button button {
+    font-size: 0.55rem !important;
+    padding: 0.34rem 0.72rem !important;
+    letter-spacing: 0.04em !important;
+}
+
+.st-key-worker_new_button button:hover {
+    transform: none !important;
+}
+
+@media (max-width: 768px) {
+    .stButton button {
+        font-size: 0.51rem !important;
+        padding: 0.3rem 0.65rem !important;
+        min-height: 1.85rem !important;
+    }
+
+    .st-key-worker_new_button button {
+        font-size: 0.5rem !important;
+        padding: 0.28rem 0.62rem !important;
+    }
+
+    .st-key-resumen_prev_button button {
+        font-size: 0.5rem !important;
+        padding: 0.28rem 0.6rem !important;
+    }
 }
 
 [data-testid="stAlert"] {

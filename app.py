@@ -1,6 +1,6 @@
 ﻿from pathlib import Path
 from uuid import uuid4
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time
 from types import SimpleNamespace
 import base64
 from zoneinfo import ZoneInfo
@@ -79,6 +79,7 @@ SECRET_JSON_PATHS = (
     Path(".streamlit/secrets.toml"),
     Path(".streamlit/secret.toml"),
 )
+PERU_TIMEZONE = ZoneInfo("America/Lima")
 
 
 def clean_service_account(service_account):
@@ -124,11 +125,16 @@ def format_time(value):
         text = value.strip()
         if "T" in text:
             try:
-                return datetime.fromisoformat(text.replace("Z", "+00:00")).strftime("%H:%M")
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(PERU_TIMEZONE)
+                return parsed.strftime("%H:%M")
             except ValueError:
                 pass
         return text[:5] if len(text) >= 5 and text[2] == ":" else text
     if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone(PERU_TIMEZONE)
         return value.strftime("%H:%M")
     return value.strftime("%H:%M")
 
@@ -480,7 +486,6 @@ def build_schedule_inputs(selected_days, key_prefix="schedule", initial_schedule
 def _combine_local_datetime(fecha_value, hora_value):
     if not fecha_value or not hora_value:
         return None
-    local_zone = ZoneInfo("America/Lima")
     if isinstance(fecha_value, str):
         fecha_obj = date.fromisoformat(fecha_value[:10])
     else:
@@ -490,7 +495,7 @@ def _combine_local_datetime(fecha_value, hora_value):
     else:
         hora_obj = hora_value
     combined = datetime.combine(fecha_obj, hora_obj)
-    return combined.replace(tzinfo=local_zone).isoformat()
+    return combined.replace(tzinfo=PERU_TIMEZONE).isoformat()
 
 
 def save_worker_with_schedule(worker_data, selected_days, schedule):

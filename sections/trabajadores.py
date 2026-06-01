@@ -437,7 +437,7 @@ def render_trabajadores(api):
             label_visibility="collapsed",
         )
     with col_btn:
-        if st.button("Nuevo trabajador", use_container_width=True):
+        if st.button("Nuevo trabajador", use_container_width=True, key="worker_new_button"):
             st.session_state["worker_form_mode"] = "crear"
             st.session_state["worker_id_editar"] = None
             st.rerun()

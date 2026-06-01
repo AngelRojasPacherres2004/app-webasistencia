@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import closing
 from datetime import datetime, timezone
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import bcrypt
 from psycopg2 import sql
@@ -25,7 +26,7 @@ def get_supabase_client():
 
 
 def server_timestamp():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).astimezone(ZoneInfo("America/Lima")).isoformat()
 
 
 def table_key_field(table_name):

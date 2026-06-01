@@ -120,7 +120,7 @@ def render_tiendas(api):
             label_visibility="collapsed",
         )
     with col_btn:
-        if st.button("➕ Nueva tienda", use_container_width=True):
+        if st.button("Nueva tienda", use_container_width=True):
             st.session_state["store_form_mode"] = "create"
             st.session_state["store_id_editar"] = None
             st.rerun()

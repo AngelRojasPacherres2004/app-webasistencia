@@ -169,7 +169,7 @@ def render_resumen(api=None):
         key="resumen_store_filter",
         label_visibility="collapsed",
     )
-    if sc3.button("Anterior", use_container_width=True):
+    if sc3.button("Anterior", use_container_width=True, key="resumen_prev_button"):
         st.session_state["resumen_week"] = current_start - timedelta(days=7)
         st.rerun()
     picked = sc4.date_input("Semana", value=current_start, key="resumen_picker", label_visibility="collapsed")
