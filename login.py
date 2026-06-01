@@ -167,6 +167,3 @@ def render_login():
                     })
                     if diag["error"]:
                         st.error(diag["error"])
-
-        st.caption("Tabla `administrador`: login por `correo` con `contrasena` hash bcrypt.")
-        st.caption("Si quieres respaldo local, usa `[admin_auth]` en `.streamlit/secrets.toml`.")

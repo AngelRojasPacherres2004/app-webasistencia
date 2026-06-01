@@ -894,11 +894,11 @@ def admin_page():
     with st.sidebar:
         st.markdown("""
         <div style="position: relative; z-index: 2;">
-        <div style="padding:1rem 0 1.5rem;">
-            <div style="font-family:'Space Mono',monospace;font-size:1.1rem;color:#ffffff;font-weight:700;">
+        <div style="padding:1rem 0 1.5rem; text-align: center;">
+            <div style="font-family:'Space Mono',monospace;font-size:1.1rem;color:#ffffff;font-weight:700; width:100%;">
                 Admin Asistencia
             </div>
-            <div style="font-size:0.78rem;color:#e0e0e0;margin-top:0.3rem;font-weight:500;">
+            <div style="font-size:0.78rem;color:#e0e0e0;margin-top:0.3rem;font-weight:500; width:100%;">
                 Panel de RRHH
             </div>
         </div>
