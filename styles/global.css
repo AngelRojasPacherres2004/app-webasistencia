@@ -57,18 +57,22 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     background: transparent !important; 
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
     display: flex !important;
-    z-index: 100 !important;
+    z-index: 90 !important;
 }
 
 /* Asegurar visibilidad del botón de abrir/cerrar sidebar */
 button[data-testid="stSidebarCollapseButton"],
 [data-testid="stSidebarCollapsedControl"] button {
-    color: var(--tertiary) !important;
     color: #ffffff !important;
     background-color: rgba(255, 255, 255, 0.2) !important;
     border-radius: 50% !important;
 }
 
+button[data-testid="stSidebarCollapseButton"] svg,
+[data-testid="stSidebarCollapsedControl"] button svg {
+    fill: #ffffff !important;
+    color: #ffffff !important;
+}
 
 
 [data-testid="stSidebar"] {
@@ -79,7 +83,7 @@ button[data-testid="stSidebarCollapseButton"],
     backdrop-filter: blur(10px) !important;
     border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
     box-shadow: 8px 0 60px rgba(0, 0, 0, 0.5) !important;
-    z-index: 20 !important;
+    z-index: 1000 !important;
     padding-bottom: 0 !important;
 }
 
