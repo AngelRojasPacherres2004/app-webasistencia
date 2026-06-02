@@ -258,7 +258,9 @@ p, [data-testid="stText"], small, label {
 .stCaption, [data-testid="stCaptionContainer"] {
     font-family: var(--mono) !important;
     font-size: 0.72rem !important;
-    color: var(--muted) !important;
+    color: #000000 !important;
+    opacity: 1 !important;
+    font-weight: 700 !important;
 }
 
 [data-testid="stMetric"] {
@@ -524,6 +526,7 @@ p, [data-testid="stText"], small, label {
 .row-sub {
     color: #000000 !important;
     font-size: 0.72rem;
+    font-weight: 700 !important;
     opacity: 1 !important;
 }
 
