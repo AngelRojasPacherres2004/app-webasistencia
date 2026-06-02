@@ -11,8 +11,8 @@
     --accent: #78bdf2;
     --accent2: #d8efff;
     --danger: var(--tertiary);
-    --text: #1f2a37;
-    --muted: #5f7182;
+    --text: #000000;
+    --muted: var(--text);
     --mono: 'Space Mono', monospace;
     --sans: 'DM Sans', sans-serif;
 }
@@ -47,9 +47,9 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     transform: none !important;
     left: 0 !important;
     right: auto !important;
-    width: 20rem !important;
-    min-width: 20rem !important;
-    max-width: 20rem !important;
+    width: 16rem !important; /* Ajusta aquí el ancho general del sidebar */
+    min-width: 16rem !important;
+    max-width: 16rem !important;
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
     backdrop-filter: blur(10px) !important;
     border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -74,56 +74,80 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     width: 100% !important;
 }
 
-[data-testid="stSidebar"] > div:first-child { padding-top: 0rem; padding-left: 1rem; padding-right: 1rem; }
-[data-testid="stSidebar"] [role="radiogroup"] { gap: 0.45rem; }
+[data-testid="stSidebar"] > div:first-child {
+    padding-top: 0rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+}
+
+/* ── Separación entre botones ── */
+[data-testid="stSidebar"] [role="radiogroup"] {
+    gap: 1.8rem !important;
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+}
 
 [data-testid="stSidebar"] label,
 .stButton button {
     border-radius: 8px !important;
 }
 
+/* ── Botones del sidebar: ancho completo, centrados, sin word-wrap ── */
 [data-testid="stSidebar"] [role="radiogroup"] label {
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
     width: 100% !important;
-    min-height: 3.8rem !important;
-    padding: 12px 20px !important;
-    margin-bottom: 0.8rem !important;
-    background: rgba(255, 255, 255, 0.05) !important;
-    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    margin-bottom: 0.2rem !important;
+    height: 3.2rem !important;
+    line-height: 1 !important;
+    padding: 0 1.2rem !important;
+    /* Nuevo Estilo: Glassmorphism de precisión */
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
     border-radius: 14px !important;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    backdrop-filter: blur(20px);
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+    backdrop-filter: blur(12px) !important;
+    
     color: #ffffff !important;
-    font-weight: 500 !important;
+    font-weight: 700 !important;
     font-family: var(--mono) !important;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.12em !important;
     text-transform: uppercase;
     cursor: pointer !important;
     box-sizing: border-box !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
 }
 
-/* Forzar color blanco en todos los sub-elementos (texto de Streamlit) */
+/* Forzar color blanco en todos los sub-elementos */
 [data-testid="stSidebar"] [role="radiogroup"] label * {
     color: #ffffff !important;
 }
 
 [data-testid="stSidebar"] [role="radiogroup"] label:hover {
-    background: rgba(255, 255, 255, 0.12) !important;
-    border-color: rgba(255, 255, 255, 0.35) !important;
-    transform: scale(1.02);
-    box-shadow: 0 8px 24px rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.08) !important;
+    border-color: rgba(255, 255, 255, 0.25) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3) !important;
 }
 
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
-    border-color: #3b82f6 !important;
-    box-shadow: 0 12px 32px rgba(37, 99, 235, 0.45) !important;
-    font-weight: 700 !important;
+    /* Estilo Activo: Degradado Neón Azul con Glow */
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.4) !important;
+    box-shadow: 0 0 20px rgba(37, 99, 235, 0.5), 
+                0 10px 25px rgba(0, 0, 0, 0.4) !important;
+    transform: translateY(-3px) scale(1.02) !important;
+    color: #ffffff !important;
+    z-index: 2;
 }
 
-/* Asegurar que el label principal "Sección" no parezca un botón y sea discreto */
+/* Label "Sección" discreto */
 [data-testid="stSidebar"] label[data-testid="stWidgetLabel"] {
     background: transparent !important;
     border: none !important;
@@ -134,18 +158,19 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     justify-content: flex-start !important;
     font-family: var(--mono) !important;
     font-size: 0.7rem !important;
-    color: rgba(255, 255, 255, 0.4) !important;
+    color: #ffffff !important;
     text-transform: uppercase;
     letter-spacing: 0.15em;
     pointer-events: none !important;
+    white-space: normal !important;
 }
 
-/* Ocultar el círculo del radio button para que parezca un botón simétrico */
+/* Ocultar el círculo del radio button */
 [data-testid="stSidebar"] [role="radiogroup"] label div:first-child:not([data-testid="stMarkdownContainer"]) {
     display: none !important;
 }
 
-/* Ajustar el contenedor del texto para que ocupe todo el ancho y esté centrado */
+/* Texto centrado dentro del botón */
 [data-testid="stSidebar"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] {
     width: 100% !important;
     text-align: center !important;
@@ -154,7 +179,12 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
 
 [data-testid="stSidebar"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] p {
     margin: 0 !important;
-    font-size: 0.95rem !important;
+    font-size: 0.65rem !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    text-align: center !important;
 }
 
 .main .block-container {
@@ -422,7 +452,7 @@ p, [data-testid="stText"], small, label {
 
 .week-panel-sub {
     font-size: 0.75rem;
-    color: #64748b;
+    color: var(--text);
     margin-top: 0.15rem;
 }
 
@@ -460,7 +490,7 @@ p, [data-testid="stText"], small, label {
     text-align: left;
     padding: 0.85rem 0.9rem;
     background: #f8fafc;
-    color: #64748b;
+    color: var(--text);
     font-family: var(--mono);
     font-size: 0.68rem;
     text-transform: uppercase;
@@ -470,23 +500,58 @@ p, [data-testid="stText"], small, label {
 }
 .at-table tbody tr { border-bottom: 1px solid #f1f5f9; }
 .at-table tbody tr:hover { background: #fafbff; }
-.at-table td { padding: 1rem 0.9rem; vertical-align: middle; color: #1e293b; }
+.at-table td { padding: 1rem 0.9rem; vertical-align: middle; color: #000000; }
 .at-table td.worker-td { min-width: 160px; }
-.worker-name { font-weight: 700; color: #0f172a; font-size: 0.85rem; }
-.worker-meta { font-size: 0.69rem; color: #64748b; margin-top: 0.15rem; }
+.worker-name { font-weight: 700; color: #000000; font-size: 0.85rem; }
+.worker-meta { font-size: 0.69rem; color: var(--text); margin-top: 0.15rem; }
+
+/* Estilos para la lista de trabajadores - Texto Negro */
+.table-header {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    color: #000000 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+}
+
+.row-main {
+    font-weight: 700;
+    color: #000000 !important;
+    font-size: 0.85rem;
+}
+
+.row-sub {
+    color: #000000 !important;
+    font-size: 0.72rem;
+    opacity: 1 !important;
+}
+
+.badge {
+    padding: 2px 10px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.65rem;
+    font-family: var(--mono);
+    display: inline-block;
+}
+.badge--active { background: #dcfce7; color: #000000 !important; }
+.badge--inactive { background: #fee2e2; color: #000000 !important; }
+.badge--blue { background: #dbeafe; color: #000000 !important; }
+.badge--gray { background: #f1f5f9; color: #000000 !important; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: #f8fafc; }
 ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #b0b7c3; }
 
-/* Botón Cerrar Sesión - Estilo Premium */
+/* Botón Cerrar Sesión */
 .st-key-logout_btn {
     position: fixed !important;
     bottom: 1.5rem !important;
-    left: 1rem !important;
+    left: 0.75rem !important;
     right: auto !important;
-    width: 18rem !important;
+    width: calc(15rem - 1.5rem) !important; /* Ajusta este cálculo para que coincida con el ancho del sidebar */
     padding: 0 !important;
     margin: 0 !important;
     z-index: 21 !important;
@@ -503,7 +568,7 @@ p, [data-testid="stText"], small, label {
     font-weight: 700 !important;
     line-height: 1 !important;
     padding: 0.7rem 1.2rem !important;
-    min-height: 2.6rem !important;
+    height: 3.2rem !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;

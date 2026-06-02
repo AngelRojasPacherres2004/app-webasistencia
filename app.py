@@ -898,7 +898,7 @@ def admin_page():
             <div style="font-family:'Space Mono',monospace;font-size:1.1rem;color:#ffffff;font-weight:700; width:100%;">
                 Admin Asistencia
             </div>
-            <div style="font-size:0.78rem;color:#e0e0e0;margin-top:0.3rem;font-weight:500; width:100%;">
+            <div style="font-size:0.78rem;color:#ffffff;margin-top:0.3rem;font-weight:500; width:100%;">
                 Panel de RRHH
             </div>
         </div>
@@ -948,10 +948,10 @@ def admin_page():
                 <div style="font-size:1.45rem; color:#78bdf2; line-height:1;">⬡</div>
                 <div>
                     <div style="font-family:'Space Mono',monospace; font-size:1.35rem;
-                                letter-spacing:0.04em; color:#1f2a37; line-height:1;">
+                                letter-spacing:0.04em; color:#000000; line-height:1;">
                         Panel de Administración
                     </div>
-                    <div style="font-size:0.79rem; color:#5f7182; font-family:'DM Sans',sans-serif;
+                    <div style="font-size:0.79rem; color:var(--text); font-family:'DM Sans',sans-serif;
                                 margin-top:0.24rem;">
                         Sistema de Asistencia · PostgreSQL
                     </div>

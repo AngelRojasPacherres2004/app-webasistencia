@@ -128,10 +128,10 @@ def render_resumen(api=None):
         <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.25rem;">
             <div style="font-size:1.4rem;color:#2563eb;">⬡</div>
             <div>
-                <div style="font-family:'Space Mono',monospace;font-size:1.25rem;letter-spacing:0.03em;color:#111827;line-height:1.1;">
+                <div style="font-family:'Space Mono',monospace;font-size:1.25rem;letter-spacing:0.03em;color:#000000;line-height:1.1;">
                     Asistencias
                 </div>
-                <div style="font-size:0.78rem;color:#6b7280;font-family:'DM Sans',sans-serif;margin-top:0.15rem;">
+                <div style="font-size:0.78rem;color:#000000;font-family:'DM Sans',sans-serif;margin-top:0.15rem;">
                     Vista semanal por trabajador · PostgreSQL
                 </div>
             </div>
