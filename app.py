@@ -119,7 +119,7 @@ def normalize_email(email):
 
 
 def format_time(value):
-    if not value:
+    if value is None or value == "" or value is False:
         return ""
     if isinstance(value, str):
         text = value.strip()
@@ -511,10 +511,10 @@ def save_worker_with_schedule(worker_data, selected_days, schedule):
         insert_document("horario_trabajador", {
             "dni_trabajador": dni,
             "dia_semana": day,
-            "horario_entrada": day_schedule.get("hora_inicio") or None,
+            "horario_entrada": day_schedule.get("hora_inicio") if day_schedule.get("hora_inicio") not in (None, "") else "00:00",
             "horario_inicio_receso": day_schedule.get("inicio_receso") or None,
             "horario_fin_receso": day_schedule.get("final_receso") or None,
-            "horario_salida": day_schedule.get("hora_final") or None,
+            "horario_salida": day_schedule.get("hora_final") if day_schedule.get("hora_final") not in (None, "") else "00:00",
         })
 
 
@@ -663,10 +663,10 @@ def trabajador_form():
         insert_document("horario_trabajador", {
             "dni_trabajador": doc_id,
             "dia_semana": day,
-            "horario_entrada": schedule_item.get("hora_inicio") or None,
+            "horario_entrada": schedule_item.get("hora_inicio") if schedule_item.get("hora_inicio") not in (None, "") else "00:00",
             "horario_inicio_receso": schedule_item.get("inicio_receso") or None,
             "horario_fin_receso": schedule_item.get("final_receso") or None,
-            "horario_salida": schedule_item.get("hora_final") or None,
+            "horario_salida": schedule_item.get("hora_final") if schedule_item.get("hora_final") not in (None, "") else "00:00",
         })
     st.session_state["worker_success_message"] = f"✓  Trabajador registrado → `{WORKER_COLLECTION}/{doc_id}`"
     st.session_state["worker_form_seed"] = form_seed + 1

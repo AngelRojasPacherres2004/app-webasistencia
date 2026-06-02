@@ -1,4 +1,5 @@
 from datetime import date
+from uuid import uuid4
 
 import streamlit as st
 
@@ -241,7 +242,7 @@ def _handle_store_create(api, form):
         st.error("Campos requeridos: " + ", ".join(missing))
         return
 
-    store_id = api.normalize_doc_id(form["nombre_tienda"])
+    store_id = str(uuid4())
     if api.document_exists(api.STORE_COLLECTION, store_id):
         st.error(f"Ya existe una tienda con el ID `{store_id}`.")
         return

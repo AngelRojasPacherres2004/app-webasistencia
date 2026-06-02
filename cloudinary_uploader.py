@@ -133,4 +133,3 @@ def upload_worker_file(uploaded_file, worker_id):
         "resource_type": result.get("resource_type", ""),
         "name": uploaded_file.name,
     }
-
