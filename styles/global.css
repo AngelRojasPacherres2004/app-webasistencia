@@ -36,6 +36,17 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
 }
 
 [data-testid="stAppViewContainer"] > .main { background: transparent !important; }
+
+/* Estilo para los contenedores st.container(border=True) para que parezcan Paneles (como en Asistencias) */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    background-color: #ffffff !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    padding: 1.5rem !important;
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06) !important;
+    margin-bottom: 1.5rem !important;
+}
+
 [data-testid="stHeader"] { 
     background: transparent !important; 
     display: flex !important;

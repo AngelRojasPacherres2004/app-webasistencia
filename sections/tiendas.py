@@ -165,26 +165,30 @@ def render_tiendas(api):
 
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
-    for store in tiendas:
-        with st.container(border=True):
+    # Envolvemos toda la lista en un único contenedor unificado (Panel)
+    with st.container(border=True):
+        for i, store in enumerate(tiendas):
+            if i > 0:
+                st.markdown("<hr style='margin:0.5rem 0; border-color:#f1f5f9; opacity:0.6;'>", unsafe_allow_html=True)
+            
             col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1.4, 1.6, 1.8, 1, 0.6, 0.6])
 
             with col1:
                 st.markdown(
                     f"""
                     <div>
-                        <span class="row-main">{store.get('nombre_tienda', '—')}</span>
-                        <br><span class="row-sub">{store.get('telefono', '') or 'Sin teléfono'}</span>
+                        <div class="row-main">{store.get('nombre_tienda', '—')}</div>
+                        <div class="row-sub">{store.get('telefono', '') or 'Sin teléfono'}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
             with col2:
-                st.caption(store.get("id_tienda", "—"))
+                st.caption(str(store.get("id_tienda", "—")))
             with col3:
-                st.caption(store.get("correo", "—"))
+                st.caption(str(store.get("correo", "—")))
             with col4:
-                st.caption(store.get("direccion", "—"))
+                st.caption(str(store.get("direccion", "—")))
             with col5:
                 st.markdown(_badge_estado(store.get("estado", True)), unsafe_allow_html=True)
 
@@ -212,13 +216,16 @@ def render_tiendas(api):
                     st.session_state["store_id_editar"] = store["id_tienda"]
                     st.rerun()
 
-        if st.session_state.get("store_form_mode") == "edit" and st.session_state.get("store_id_editar") == store["id_tienda"]:
+    # Formulario de edición fuera de la lista para mantener la estructura de panel limpia
+    if st.session_state.get("store_form_mode") == "edit" and st.session_state.get("store_id_editar"):
+        store_to_edit = next((s for s in tiendas if s["id_tienda"] == st.session_state["store_id_editar"]), None)
+        if store_to_edit:
             st.markdown("---")
-            form = _render_store_form(api, store=store)
+            form = _render_store_form(api, store=store_to_edit)
             if form["submitted"]:
-                _handle_store_update(api, store, form)
+                _handle_store_update(api, store_to_edit, form)
 
-            if st.button("✖ Cancelar edición", key=f"cancel_edit_store_{store['id_tienda']}"):
+            if st.button("✖ Cancelar edición", key="btn_cancel_edit_store"):
                 st.session_state["store_form_mode"] = "list"
                 st.session_state["store_id_editar"] = None
                 st.rerun()

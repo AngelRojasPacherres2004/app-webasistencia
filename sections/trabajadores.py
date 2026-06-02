@@ -487,39 +487,45 @@ def render_trabajadores(api):
 
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
-    for worker in trabajadores:
-        with st.container(border=True):
+    # Envolvemos toda la lista en un único contenedor unificado (Panel)
+    with st.container(border=True):
+        for i, worker in enumerate(trabajadores):
+            if i > 0:
+                st.markdown("<hr style='margin:0.5rem 0; border-color:#f1f5f9; opacity:0.6;'>", unsafe_allow_html=True)
+            
             col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1.2, 1.2, 1.2, 1, 0.6, 0.6])
 
             with col1:
+                nombre = worker.get("nombre_trabajador", "-")
                 alias = worker.get("nombre_sede", "") or ""
                 st.markdown(
                     f"""
                     <div>
-                        <span class="row-main">{worker.get('nombre_trabajador', '-')}</span>
-                        {f'<br><span class="row-sub">{alias}</span>' if alias else ''}
+                        <div class="row-main">{nombre}</div>
+                        <div class="row-sub">{alias}</div>
                     </div>
                     """,
-                    unsafe_allow_html=True,
+                    unsafe_allow_html=True
                 )
 
             with col2:
-                st.caption(worker.get("dni", "-"))
-
+                st.caption(str(worker.get("dni", "-")))
+            
             with col3:
-                st.markdown(_badge_cargo(worker.get("area", "")), unsafe_allow_html=True)
-
+                # Usamos el cargo asignado para el badge
+                st.markdown(_badge_cargo(worker.get("area", worker.get("cargo", ""))), unsafe_allow_html=True)
+            
             with col4:
-                st.caption(worker.get("nombre_sede", "-"))
-
+                st.caption(str(worker.get("nombre_sede", "-")))
+            
             with col5:
                 st.markdown(_badge_estado(worker.get("estado", True)), unsafe_allow_html=True)
 
             with col6:
-                estado_actual = worker.get("estado", True)
+                estado_actual = bool(worker.get("estado", True))
                 emoji = "🟢" if estado_actual else "🔴"
                 nuevo_estado = not estado_actual
-                if st.button(emoji, key=f"toggle_w_{worker['dni']}", help="Cambiar estado", use_container_width=True):
+                if st.button(emoji, key=f"toggle_worker_{worker['dni']}", help="Cambiar estado", use_container_width=True):
                     try:
                         api.update_document(
                             api.WORKER_COLLECTION,
@@ -528,138 +534,24 @@ def render_trabajadores(api):
                             key_field="dni",
                         )
                         st.cache_data.clear()
-                        st.session_state["worker_success_message"] = "Estado actualizado."
+                        st.session_state["worker_success_message"] = "✅ Estado actualizado."
                     except Exception as exc:
                         st.session_state["worker_success_message"] = f"Error: {exc}"
                     st.rerun()
 
             with col7:
-                if st.button("🖍", key=f"edit_w_{worker['dni']}", help="Editar", use_container_width=True):
+                if st.button("🖍", key=f"edit_worker_{worker['dni']}", help="Editar", use_container_width=True):
                     st.session_state["worker_form_mode"] = "editar"
                     st.session_state["worker_id_editar"] = worker["dni"]
                     st.rerun()
 
-        if (
-            st.session_state["worker_form_mode"] == "editar"
-            and st.session_state["worker_id_editar"] == worker["dni"]
-        ):
-            _render_worker_form(api, worker=worker)
-
-            if st.button("Cancelar edicion", key=f"cancel_edit_w_{worker['dni']}"):
-                st.session_state["worker_form_mode"] = None
+    # Formulario de edición fuera del panel de lista
+    if st.session_state.get("worker_form_mode") == "editar" and st.session_state.get("worker_id_editar"):
+        worker_to_edit = next((w for w in trabajadores if w["dni"] == st.session_state["worker_id_editar"]), None)
+        if worker_to_edit:
+            st.markdown("---")
+            _render_worker_form(api, worker=worker_to_edit)
+            if st.button("✖ Cancelar edición", key="btn_cancel_edit_worker"):
+                st.session_state["worker_form_mode"] = "list"
                 st.session_state["worker_id_editar"] = None
                 st.rerun()
-
-            st.markdown(
-                """
-                <div style="margin:16px 0 8px;">
-                    <span class="section-header__title" style="font-size:14px;">Horario registrado</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-            horarios_w = [
-                row for row in horarios
-                if str(row.get("dni_trabajador", "")).strip() == str(worker.get("dni", "")).strip()
-            ]
-            if horarios_w:
-                cols_h = st.columns([1.2, 1, 1, 1, 1])
-                for col, label in zip(cols_h, ["Dia", "Entrada", "Ini. receso", "Fin receso", "Salida"]):
-                    col.markdown(f"<span class='table-header'>{label}</span>", unsafe_allow_html=True)
-                for row in horarios_w:
-                    c1, c2, c3, c4, c5 = st.columns([1.2, 1, 1, 1, 1])
-                    c1.caption(row.get("dia_semana", "-").capitalize())
-                    c2.caption(row.get("horario_entrada", "-"))
-                    c3.caption(row.get("horario_inicio_receso", "-"))
-                    c4.caption(row.get("horario_fin_receso", "-"))
-                    c5.caption(row.get("horario_salida", "-"))
-            else:
-                st.info("Este trabajador aun no tiene horarios registrados.")
-            return
-
-    return
-    st.markdown("<div style='height:1.25rem'></div>", unsafe_allow_html=True)
-    st.markdown(
-        """
-        <div style='margin-bottom:12px;'>
-            <span class='section-header__title'>Resumen salarial</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    salary_worker_options = {f"{worker['nombre_trabajador']} - {worker['dni']}": worker for worker in trabajadores}
-    if not salary_worker_options:
-        st.info("No hay trabajadores disponibles para calcular el salario.")
-        return
-
-    salary_cols = st.columns([2.4, 1.2])
-    selected_salary_label = salary_cols[0].selectbox(
-        "Trabajador seleccionado",
-        options=list(salary_worker_options.keys()),
-        index=None,
-        placeholder="Selecciona un trabajador",
-        key="salary_worker_select",
-    )
-
-    selected_salary_worker = salary_worker_options.get(selected_salary_label) if selected_salary_label else None
-    if not selected_salary_worker:
-        st.caption("Selecciona un trabajador para ver el calculo mensual.")
-        return
-
-    attendance_rows = api.get_asistencias_trabajador(selected_salary_worker["id_trabajador"])
-    attendance_months = sorted({
-        date.fromisoformat(str(item.get("fecha", ""))[:10]).replace(day=1)
-        for item in attendance_rows
-        if str(item.get("fecha", "")).strip()
-    })
-    if not attendance_months:
-        attendance_months = [date.today().replace(day=1)]
-
-    month_key = f"salary_month_{selected_salary_worker['dni']}"
-    if month_key not in st.session_state or st.session_state[month_key] not in attendance_months:
-        st.session_state[month_key] = attendance_months[-1]
-
-    selected_month = salary_cols[1].selectbox(
-        "Mes",
-        options=attendance_months,
-        format_func=lambda value: value.strftime("%B %Y"),
-        key=month_key,
-    )
-
-    salary_summary = _build_salary_summary(api, selected_salary_worker, selected_month)
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("Sueldo base", f"S/ {salary_summary['base_salary']:,.2f}")
-    metric_cols[1].metric("Faltas", salary_summary["absences"])
-    metric_cols[2].metric("Tardanzas", salary_summary["tardies"])
-    metric_cols[3].metric("Total estimado", f"S/ {salary_summary['net_salary']:,.2f}")
-
-    st.caption(
-        f"Mes evaluado: `{selected_month.strftime('%B %Y')}` · "
-        f"{salary_summary['expected_days']} dias programados · "
-        f"dia base `S/ {salary_summary['daily_rate']:,.2f}` · "
-        f"hora referencial `S/ {salary_summary['hour_rate']:,.2f}`"
-    )
-
-    detail_cols = st.columns(3)
-    detail_cols[0].metric("Descuento por faltas", f"S/ {salary_summary['absence_deduction']:,.2f}")
-    detail_cols[1].metric("Descuento por tardanzas", f"S/ {salary_summary['tardy_deduction']:,.2f}")
-    detail_cols[2].metric("Descuentos totales", f"S/ {salary_summary['total_deductions']:,.2f}")
-
-    with st.expander("Ver calculo detallado", expanded=False):
-        st.markdown(
-            f"""
-            <div style="font-size:0.9rem;line-height:1.6;">
-                <strong>Formula:</strong><br>
-                Sueldo base - faltas - tardanzas<br>
-                = <code>S/ {salary_summary['base_salary']:,.2f}</code>
-                - <code>S/ {salary_summary['absence_deduction']:,.2f}</code>
-                - <code>S/ {salary_summary['tardy_deduction']:,.2f}</code>
-                = <code>S/ {salary_summary['net_salary']:,.2f}</code>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        if salary_summary["breakdown"]:
-            st.dataframe(salary_summary["breakdown"], use_container_width=True, hide_index=True)
