@@ -36,20 +36,25 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
 }
 
 [data-testid="stAppViewContainer"] > .main { background: transparent !important; }
-[data-testid="stHeader"] { display: none !important; }
-[data-testid="stToolbar"] { display: none; }
+[data-testid="stHeader"] { 
+    background: transparent !important; 
+    display: flex !important;
+}
+
+/* Asegurar visibilidad del botón de abrir/cerrar sidebar */
+button[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsedControl"] button {
+    color: var(--tertiary) !important;
+    background-color: rgba(255, 255, 255, 0.2) !important;
+    border-radius: 50% !important;
+}
+
+
 
 [data-testid="stSidebar"] {
     display: flex !important;
     flex-direction: column !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    transform: none !important;
-    left: 0 !important;
-    right: auto !important;
-    width: 16rem !important; /* Ajusta aquí el ancho general del sidebar */
-    min-width: 16rem !important;
-    max-width: 16rem !important;
+    width: 16rem; /* Quitamos !important para permitir la animación de colapso de Streamlit */
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
     backdrop-filter: blur(10px) !important;
     border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -99,9 +104,9 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     justify-content: center !important;
     align-items: center !important;
     width: 100% !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-    margin-bottom: 0.2rem !important;
+    margin-left: 2rem !important;
+    margin-right: 1rem !important;
+    margin-bottom: 0.8rem !important;
     height: 3.2rem !important;
     line-height: 1 !important;
     padding: 0 1.2rem !important;
@@ -550,14 +555,10 @@ p, [data-testid="stText"], small, label {
 
 /* Botón Cerrar Sesión */
 .st-key-logout_btn {
-    position: fixed !important;
-    bottom: 1.5rem !important;
-    left: 0.75rem !important;
-    right: auto !important;
-    width: calc(15rem - 1.5rem) !important; /* Ajusta este cálculo para que coincida con el ancho del sidebar */
+    width: 100% !important;
     padding: 0 !important;
-    margin: 0 !important;
-    z-index: 21 !important;
+    margin-top: auto !important;
+    padding-bottom: 0.3rem !important;
 }
 
 .st-key-logout_btn button {
