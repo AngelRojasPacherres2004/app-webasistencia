@@ -149,24 +149,18 @@ def render_tiendas(api):
         st.info("No se encontraron tiendas.")
         return
 
-    st.markdown(
-        """
-        <div style='margin-bottom:12px;'>
-            <span class='section-header__title'>Lista de tiendas</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    headers = ["TIENDA", "ID", "CORREO", "DIRECCIÓN", "ESTADO", "", ""]
-    cols_head = st.columns([2.5, 1.4, 1.6, 1.8, 1, 0.6, 0.6])
-    for col, header in zip(cols_head, headers):
-        col.markdown(f"<span class='table-header'>{header}</span>", unsafe_allow_html=True)
-
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-    # Envolvemos toda la lista en un único contenedor unificado (Panel)
+    # Envolvemos toda la lista y encabezados en un único contenedor unificado (Panel responsivo)
     with st.container(border=True):
+        st.markdown("<div style='margin-bottom:15px;'><span class='section-header__title'>Lista de tiendas</span></div>", unsafe_allow_html=True)
+        
+        # Cabecera de la tabla dentro del contenedor para mantener alineación responsiva
+        headers = ["TIENDA", "ID", "CORREO", "DIRECCIÓN", "ESTADO", "", ""]
+        cols_head = st.columns([2.5, 1.4, 1.6, 1.8, 1, 0.6, 0.6])
+        for col, header in zip(cols_head, headers):
+            col.markdown(f"<span class='table-header'>{header}</span>", unsafe_allow_html=True)
+        
+        st.markdown("<hr style='margin:0.8rem 0; border-color:#e2e8f0; opacity:0.8;'>", unsafe_allow_html=True)
+
         for i, store in enumerate(tiendas):
             if i > 0:
                 st.markdown("<hr style='margin:0.5rem 0; border-color:#f1f5f9; opacity:0.6;'>", unsafe_allow_html=True)

@@ -471,24 +471,18 @@ def render_trabajadores(api):
         st.info("No se encontraron trabajadores.")
         return
 
-    st.markdown(
-        """
-        <div style='margin-bottom:12px;'>
-            <span class='section-header__title'>Lista de trabajadores</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    col_h = st.columns([2.5, 1.2, 1.2, 1.2, 1, 0.6, 0.6])
-    headers = ["TRABAJADOR", "DNI", "CARGO", "TIENDA", "ESTADO", "", ""]
-    for col, header in zip(col_h, headers):
-        col.markdown(f"<span class='table-header'>{header}</span>", unsafe_allow_html=True)
-
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-    # Envolvemos toda la lista en un único contenedor unificado (Panel)
+    # Envolvemos toda la lista y encabezados en un único contenedor unificado (Panel responsivo)
     with st.container(border=True):
+        st.markdown("<div style='margin-bottom:15px;'><span class='section-header__title'>Lista de trabajadores</span></div>", unsafe_allow_html=True)
+        
+        # Cabecera de la tabla dentro del contenedor para mantener alineación responsiva
+        headers = ["TRABAJADOR", "DNI", "CARGO", "TIENDA", "ESTADO", "", ""]
+        col_h = st.columns([2.5, 1.2, 1.2, 1.2, 1, 0.6, 0.6])
+        for col, header in zip(col_h, headers):
+            col.markdown(f"<span class='table-header'>{header}</span>", unsafe_allow_html=True)
+            
+        st.markdown("<hr style='margin:0.8rem 0; border-color:#e2e8f0; opacity:0.8;'>", unsafe_allow_html=True)
+
         for i, worker in enumerate(trabajadores):
             if i > 0:
                 st.markdown("<hr style='margin:0.5rem 0; border-color:#f1f5f9; opacity:0.6;'>", unsafe_allow_html=True)

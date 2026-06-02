@@ -45,17 +45,26 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     padding: 1.5rem !important;
     box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06) !important;
     margin-bottom: 1.5rem !important;
+    overflow-x: auto !important;
+}
+
+/* Asegurar que las filas de la tabla mantengan su ancho mínimo para no deformarse en móvil */
+[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] {
+    min-width: 950px !important;
 }
 
 [data-testid="stHeader"] { 
     background: transparent !important; 
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%) !important;
     display: flex !important;
+    z-index: 100 !important;
 }
 
 /* Asegurar visibilidad del botón de abrir/cerrar sidebar */
 button[data-testid="stSidebarCollapseButton"],
 [data-testid="stSidebarCollapsedControl"] button {
     color: var(--tertiary) !important;
+    color: #ffffff !important;
     background-color: rgba(255, 255, 255, 0.2) !important;
     border-radius: 50% !important;
 }
