@@ -45,11 +45,17 @@ def get_cloudinary_config():
 
 
 def normalize_cloudinary_config(cloudinary_config):
+    def _clean(val):
+        # Elimina espacios y comillas accidentales (común al copiar/pegar)
+        if not val:
+            return ""
+        return str(val).strip().strip('"').strip("'").strip()
+
     return {
-        "cloud_name": str(cloudinary_config.get("cloud_name", "")).strip(),
-        "api_key": str(cloudinary_config.get("api_key", "")).strip(),
-        "api_secret": str(cloudinary_config.get("api_secret", "")).strip(),
-        "folder": str(cloudinary_config.get("folder", "trabajadores_dni")).strip(),
+        "cloud_name": _clean(cloudinary_config.get("cloud_name")),
+        "api_key": _clean(cloudinary_config.get("api_key")),
+        "api_secret": _clean(cloudinary_config.get("api_secret")),
+        "folder": _clean(cloudinary_config.get("folder", "trabajadores_dni")),
     }
 
 
@@ -113,17 +119,18 @@ def configure_cloudinary():
 
 def upload_worker_file(uploaded_file, worker_id):
     config = configure_cloudinary()
-    original_name = Path(uploaded_file.name).stem
+    # Normalizamos el nombre del archivo eliminando espacios y caracteres raros
+    original_name = "".join(c for c in Path(uploaded_file.name).stem if c.isalnum() or c in ("_", "-"))
     public_id = f"{worker_id}_{uuid4().hex}_{original_name}"
     file_buffer = BytesIO(uploaded_file.getvalue())
     file_buffer.name = uploaded_file.name
 
     result = cloudinary.uploader.upload(
         file_buffer,
-        folder=config["folder"] or "trabajadores_dni",
+        folder=config.get("folder") or "trabajadores_dni",
         public_id=public_id,
         resource_type="auto",
-        overwrite=False,
+        # Quitamos overwrite=False para simplificar la firma (por defecto es False para archivos nuevos)
     )
 
     return {
