@@ -111,25 +111,16 @@ def configure_cloudinary():
     if missing:
         raise RuntimeError("Credenciales Cloudinary incompletas: " + ", ".join(missing))
 
-    # Configuramos globalmente para asegurar consistencia en el entorno de la nube
-    cloudinary.config(
-        cloud_name=str(config["cloud_name"]),
-        api_key=str(config["api_key"]),
-        api_secret=str(config["api_secret"]),
-        secure=True
-    )
     return config
 
 
 def upload_worker_file(uploaded_file, worker_id):
     config = configure_cloudinary()
-    
-    # Diagnóstico seguro (se puede quitar una vez funcione)
-    st.info(f"Depuración - Secret inicia: {config['api_secret'][:2]}... termina: {config['api_secret'][-2:]} (Largo: {len(config['api_secret'])})")
 
-    # Normalizamos el nombre del archivo eliminando espacios y caracteres raros
-    original_name = "".join(c for c in Path(uploaded_file.name).stem if c.isalnum() or c in ("_", "-"))
-    public_id = f"{worker_id}_{uuid4().hex}_{original_name}"
+    # Simplificamos el public_id al máximo: DNI + un identificador único corto
+    # Evitamos usar el nombre original del archivo que puede traer caracteres problemáticos
+    public_id = f"dni_{worker_id}_{uuid4().hex[:8]}"
+    
     file_buffer = BytesIO(uploaded_file.getvalue())
     file_buffer.name = uploaded_file.name
 
@@ -137,11 +128,12 @@ def upload_worker_file(uploaded_file, worker_id):
         file_buffer,
         folder=str(config.get("folder") or "trabajadores_dni"),
         public_id=public_id,
-        resource_type="auto",
-        # Pasamos credenciales explícitas ignorando la configuración global de la librería
+        resource_type="image",
+        # Pasamos credenciales explícitas en cada llamada
         cloud_name=str(config["cloud_name"]),
         api_key=str(config["api_key"]),
         api_secret=str(config["api_secret"]),
+        secure=True
     )
 
     return {
