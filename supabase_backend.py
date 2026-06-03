@@ -138,14 +138,22 @@ def fetch_rows(table_name, select="*", filters=None, order_by=None, limit=None):
 
 
 def document_exists(table_name, doc_id, key_field=None):
+    # Si el ID está vacío o es nulo, no puede existir en la base de datos
+    if not doc_id or not str(doc_id).strip():
+        return False
+
     key_field = key_field or table_key_field(table_name)
-    rows = fetch_rows(
-        table_name,
-        select=key_field,
-        filters=[(key_field, "eq", doc_id)],
-        limit=1,
-    )
-    return bool(rows)
+    try:
+        rows = fetch_rows(
+            table_name,
+            select=key_field,
+            filters=[(key_field, "eq", doc_id)],
+            limit=1,
+        )
+        return bool(rows)
+    except Exception:
+        # Si hay un error de representación (ej: se envía texto a un UUID), asumimos que no existe
+        return False
 
 
 def insert_document(table_name, data):
