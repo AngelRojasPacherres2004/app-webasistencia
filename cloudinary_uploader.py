@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 import hashlib
 import time as time_module
+import re
 
 try:
     import tomllib
@@ -27,17 +28,29 @@ CLOUDINARY_SECRET_PATHS = (
 )
 
 
+def _hard_clean(val):
+    """Elimina absolutamente todo carácter que no sea ASCII imprimible."""
+    if not val:
+        return ""
+    s = str(val)
+    # Quitar BOM, comillas, espacios, saltos de línea, tabs, caracteres de control
+    s = s.strip()
+    s = s.strip('"').strip("'").strip()
+    s = re.sub(r'[\x00-\x1f\x7f-\xff\s]', '', s)
+    return s
+
+
 def get_cloudinary_config():
     try:
         if "cloudinary" in st.secrets:
-            return normalize_cloudinary_config(st.secrets["cloudinary"])
+            return _build_config(st.secrets["cloudinary"])
     except Exception:
         pass
 
     for secret_path in CLOUDINARY_SECRET_PATHS:
-        config = load_cloudinary_config_file(secret_path)
+        config = _load_file(secret_path)
         if config:
-            return normalize_cloudinary_config(config)
+            return _build_config(config)
 
     raise RuntimeError(
         "Faltan credenciales de Cloudinary. Coloca `[cloudinary]` en "
@@ -45,26 +58,25 @@ def get_cloudinary_config():
     )
 
 
-def normalize_cloudinary_config(cloudinary_config):
-    import re
+def _build_config(raw):
+    cloud_name = _hard_clean(raw.get("cloud_name", ""))
+    api_key    = _hard_clean(raw.get("api_key",    ""))
+    api_secret = _hard_clean(raw.get("api_secret", ""))
+    folder     = str(raw.get("folder", "trabajadores_dni")).strip().strip("/")
 
-    def _clean(val, strip_whitespace=False):
+    for field, val in [("cloud_name", cloud_name), ("api_key", api_key), ("api_secret", api_secret)]:
         if not val:
-            return ""
-        s = str(val).strip().strip('"').strip("'").strip()
-        if strip_whitespace:
-            s = re.sub(r'\s+', '', s)
-        return s
+            raise RuntimeError(f"Credencial Cloudinary faltante o vacía: {field}")
 
     return {
-        "cloud_name": _clean(cloudinary_config.get("cloud_name"), True),
-        "api_key":    _clean(cloudinary_config.get("api_key"),    True),
-        "api_secret": _clean(cloudinary_config.get("api_secret"), True),
-        "folder":     _clean(cloudinary_config.get("folder", "trabajadores_dni"), False),
+        "cloud_name": cloud_name,
+        "api_key":    api_key,
+        "api_secret": api_secret,
+        "folder":     folder,
     }
 
 
-def load_cloudinary_config_file(path):
+def _load_file(path):
     if not path.exists():
         return None
     raw = path.read_text(encoding="utf-8-sig").strip()
@@ -74,7 +86,7 @@ def load_cloudinary_config_file(path):
             return parsed["cloudinary"]
     except Exception:
         pass
-    section = _extract_toml_section(raw, "cloudinary")
+    section = _extract_section(raw, "cloudinary")
     if not section:
         return None
     try:
@@ -83,9 +95,8 @@ def load_cloudinary_config_file(path):
         return None
 
 
-def _extract_toml_section(raw, section_name):
-    lines = raw.splitlines()
-    result, collecting = [], False
+def _extract_section(raw, section_name):
+    lines, result, collecting = raw.splitlines(), [], False
     header = f"[{section_name}]"
     for line in lines:
         stripped = line.strip()
@@ -100,10 +111,10 @@ def _extract_toml_section(raw, section_name):
 
 def _build_signature(params: dict, api_secret: str) -> str:
     """
-    Genera la firma SHA-1 de Cloudinary.
-    Regla oficial: ordenar los parámetros alfabéticamente (excepto 'file',
-    'api_key', 'resource_type' y 'cloud_name'), concatenar como
-    key=value&key=value y añadir api_secret al final sin separador.
+    Firma oficial Cloudinary:
+    Ordenar alfabéticamente los parámetros (excluir file, api_key,
+    resource_type, cloud_name), concatenar como k=v&k=v, añadir api_secret
+    sin separador, SHA-1.
     """
     excluded = {"file", "api_key", "resource_type", "cloud_name"}
     pairs = sorted(
@@ -118,20 +129,14 @@ def _build_signature(params: dict, api_secret: str) -> str:
 def upload_worker_file(uploaded_file, worker_id):
     config = get_cloudinary_config()
 
-    for field in ("cloud_name", "api_key", "api_secret"):
-        if not config[field]:
-            raise RuntimeError(f"Credencial Cloudinary faltante: {field}")
-
     cloud_name = config["cloud_name"]
     api_key    = config["api_key"]
     api_secret = config["api_secret"]
-    folder     = config["folder"].strip("/")
+    folder     = config["folder"]
 
     public_id = f"dni_{worker_id}_{uuid4().hex[:8]}"
-    timestamp = str(int(time_module.time()))
+    timestamp  = str(int(time_module.time()))
 
-    # Parámetros que van en la firma (exactamente los que se envían al API,
-    # sin 'file', 'api_key', 'resource_type', 'cloud_name')
     sign_params = {
         "folder":    folder,
         "public_id": public_id,
@@ -139,6 +144,12 @@ def upload_worker_file(uploaded_file, worker_id):
     }
 
     signature = _build_signature(sign_params, api_secret)
+
+    # --- DEBUG: muestra en pantalla el string firmado y la firma ---
+    # Descomenta estas líneas si vuelve a fallar para ver qué está pasando:
+    # st.info(f"String to sign: folder={folder}&public_id={public_id}&timestamp={timestamp}{api_secret[:4]}***")
+    # st.info(f"Signature: {signature}")
+    # st.info(f"api_key len={len(api_key)}, api_secret len={len(api_secret)}")
 
     file_bytes = uploaded_file.getvalue()
     file_name  = uploaded_file.name
@@ -148,11 +159,11 @@ def upload_worker_file(uploaded_file, worker_id):
     response = requests.post(
         upload_url,
         data={
-            "api_key":    api_key,
-            "timestamp":  timestamp,
-            "signature":  signature,
-            "folder":     folder,
-            "public_id":  public_id,
+            "api_key":   api_key,
+            "timestamp": timestamp,
+            "signature": signature,
+            "folder":    folder,
+            "public_id": public_id,
         },
         files={"file": (file_name, BytesIO(file_bytes))},
         timeout=60,
@@ -160,7 +171,7 @@ def upload_worker_file(uploaded_file, worker_id):
 
     if response.status_code != 200:
         raise RuntimeError(
-            f"Cloudinary error {response.status_code}: {response.text[:400]}"
+            f"Cloudinary error {response.status_code}: {response.text[:600]}"
         )
 
     result = response.json()
