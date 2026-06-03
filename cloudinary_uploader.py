@@ -100,7 +100,6 @@ def extract_toml_section(raw_content, section_name):
     return "\n".join(section_lines).strip()
 
 
-@st.cache_resource(show_spinner=False, ttl=3600)
 def configure_cloudinary():
     config = get_cloudinary_config()
     required_fields = ("cloud_name", "api_key", "api_secret")
