@@ -45,17 +45,21 @@ def get_cloudinary_config():
 
 
 def normalize_cloudinary_config(cloudinary_config):
-    def _clean(val):
-        # Elimina espacios y comillas accidentales (común al copiar/pegar)
+    def _clean(val, is_key=False):
         if not val:
             return ""
-        return str(val).strip().strip('"').strip("'").replace("\r", "").strip()
+        s = str(val).strip().strip('"').strip("'")
+        if is_key:
+            import re
+            # Elimina absolutamente todo tipo de espacio en blanco (\n, \r, \t, etc) para las llaves
+            s = re.sub(r'\s+', '', s)
+        return s
 
     return {
-        "cloud_name": _clean(cloudinary_config.get("cloud_name")),
-        "api_key": _clean(cloudinary_config.get("api_key")),
-        "api_secret": _clean(cloudinary_config.get("api_secret")),
-        "folder": _clean(cloudinary_config.get("folder", "trabajadores_dni")),
+        "cloud_name": _clean(cloudinary_config.get("cloud_name"), True),
+        "api_key": _clean(cloudinary_config.get("api_key"), True),
+        "api_secret": _clean(cloudinary_config.get("api_secret"), True),
+        "folder": _clean(cloudinary_config.get("folder", "trabajadores_dni"), False),
     }
 
 
@@ -106,11 +110,23 @@ def configure_cloudinary():
     missing = [field for field in required_fields if not config[field]]
     if missing:
         raise RuntimeError("Credenciales Cloudinary incompletas: " + ", ".join(missing))
+
+    # Configuramos globalmente para asegurar consistencia en el entorno de la nube
+    cloudinary.config(
+        cloud_name=str(config["cloud_name"]),
+        api_key=str(config["api_key"]),
+        api_secret=str(config["api_secret"]),
+        secure=True
+    )
     return config
 
 
 def upload_worker_file(uploaded_file, worker_id):
     config = configure_cloudinary()
+    
+    # Diagnóstico seguro (se puede quitar una vez funcione)
+    st.info(f"Depuración - Secret inicia: {config['api_secret'][:2]}... termina: {config['api_secret'][-2:]} (Largo: {len(config['api_secret'])})")
+
     # Normalizamos el nombre del archivo eliminando espacios y caracteres raros
     original_name = "".join(c for c in Path(uploaded_file.name).stem if c.isalnum() or c in ("_", "-"))
     public_id = f"{worker_id}_{uuid4().hex}_{original_name}"
