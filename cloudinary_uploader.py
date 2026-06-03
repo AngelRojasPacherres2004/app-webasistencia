@@ -117,8 +117,8 @@ def configure_cloudinary():
 def upload_worker_file(uploaded_file, worker_id):
     config = configure_cloudinary()
 
-    # Simplificamos el public_id al máximo: DNI + un identificador único corto
-    # Evitamos usar el nombre original del archivo que puede traer caracteres problemáticos
+    # Simplificamos el public_id: prefijo + DNI + 8 caracteres aleatorios
+    # Esto evita que nombres de archivos largos o con caracteres raros rompan la firma
     public_id = f"dni_{worker_id}_{uuid4().hex[:8]}"
     
     file_buffer = BytesIO(uploaded_file.getvalue())
@@ -126,14 +126,12 @@ def upload_worker_file(uploaded_file, worker_id):
 
     result = cloudinary.uploader.upload(
         file_buffer,
-        folder=str(config.get("folder") or "trabajadores_dni"),
+        folder=config.get("folder", "trabajadores_dni"),
         public_id=public_id,
-        resource_type="image",
-        # Pasamos credenciales explícitas en cada llamada
-        cloud_name=str(config["cloud_name"]),
-        api_key=str(config["api_key"]),
-        api_secret=str(config["api_secret"]),
-        secure=True
+        # Usamos las credenciales directas para evitar fallos de configuración global
+        cloud_name=config["cloud_name"],
+        api_key=config["api_key"],
+        api_secret=config["api_secret"]
     )
 
     return {
