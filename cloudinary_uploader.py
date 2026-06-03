@@ -108,9 +108,9 @@ def configure_cloudinary():
         raise RuntimeError("Credenciales Cloudinary incompletas: " + ", ".join(missing))
 
     cloudinary.config(
-        cloud_name=config["cloud_name"],
-        api_key=config["api_key"],
-        api_secret=config["api_secret"],
+        cloud_name=str(config["cloud_name"]),
+        api_key=str(config["api_key"]),
+        api_secret=str(config["api_secret"]),
         secure=True,
     )
     return config
@@ -126,14 +126,13 @@ def upload_worker_file(uploaded_file, worker_id):
 
     result = cloudinary.uploader.upload(
         file_buffer,
-        folder=config.get("folder") or "trabajadores_dni",
+        folder=str(config.get("folder") or "trabajadores_dni"),
         public_id=public_id,
         resource_type="auto",
         # Pasamos las credenciales explícitamente para evitar fallos de firma en Streamlit Cloud
-        cloud_name=config["cloud_name"],
-        api_key=config["api_key"],
-        api_secret=config["api_secret"],
-        secure=True
+        cloud_name=str(config["cloud_name"]),
+        api_key=str(config["api_key"]),
+        api_secret=str(config["api_secret"]),
     )
 
     return {
