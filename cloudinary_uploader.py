@@ -130,7 +130,11 @@ def upload_worker_file(uploaded_file, worker_id):
         folder=config.get("folder") or "trabajadores_dni",
         public_id=public_id,
         resource_type="auto",
-        # Quitamos overwrite=False para simplificar la firma (por defecto es False para archivos nuevos)
+        # Pasamos las credenciales explícitamente para evitar fallos de firma en Streamlit Cloud
+        cloud_name=config["cloud_name"],
+        api_key=config["api_key"],
+        api_secret=config["api_secret"],
+        secure=True
     )
 
     return {
