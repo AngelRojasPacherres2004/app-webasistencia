@@ -235,10 +235,7 @@ def delete_document(table_name, doc_id, key_field=None):
 
 
 def hash_password(password):
-    value = str(password or "")
-    if not value:
-        return ""
-    return bcrypt.hashpw(value.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return str(password or "")
 
 
 def verify_password(stored_password, candidate_password):
