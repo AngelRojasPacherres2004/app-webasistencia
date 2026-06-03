@@ -49,7 +49,7 @@ def normalize_cloudinary_config(cloudinary_config):
         # Elimina espacios y comillas accidentales (común al copiar/pegar)
         if not val:
             return ""
-        return str(val).strip().strip('"').strip("'").strip()
+        return str(val).strip().strip('"').strip("'").replace("\r", "").strip()
 
     return {
         "cloud_name": _clean(cloudinary_config.get("cloud_name")),
@@ -106,13 +106,6 @@ def configure_cloudinary():
     missing = [field for field in required_fields if not config[field]]
     if missing:
         raise RuntimeError("Credenciales Cloudinary incompletas: " + ", ".join(missing))
-
-    cloudinary.config(
-        cloud_name=str(config["cloud_name"]),
-        api_key=str(config["api_key"]),
-        api_secret=str(config["api_secret"]),
-        secure=True,
-    )
     return config
 
 
@@ -129,7 +122,7 @@ def upload_worker_file(uploaded_file, worker_id):
         folder=str(config.get("folder") or "trabajadores_dni"),
         public_id=public_id,
         resource_type="auto",
-        # Pasamos las credenciales explícitamente para evitar fallos de firma en Streamlit Cloud
+        # Pasamos credenciales explícitas ignorando la configuración global de la librería
         cloud_name=str(config["cloud_name"]),
         api_key=str(config["api_key"]),
         api_secret=str(config["api_secret"]),
