@@ -29,7 +29,6 @@ def _render_store_form(api, store=None):
         unsafe_allow_html=True,
     )
 
-    estado_actual = bool(store.get("estado", True)) if store else True
     fecha_default = (
         date.fromisoformat(str(store.get("fecha_apertura"))[:10])
         if store and store.get("fecha_apertura")
@@ -71,14 +70,8 @@ def _render_store_form(api, store=None):
             "Contraseña" + (" *" if store is None else ""),
             type="password",
             placeholder="Dejar vacío para mantener" if store else "",
+            help="La contraseña se oculta con el icono del ojo.",
             key=f"{form_kind}_store_password_{form_seed}",
-        )
-        estado = col_2.selectbox(
-            "Estado",
-            options=[True, False],
-            index=0 if estado_actual else 1,
-            format_func=lambda value: "Activa" if value else "Inactiva",
-            key=f"{form_kind}_store_estado_{form_seed}",
         )
         submitted = st.form_submit_button(
             "Guardar cambios" if store else "⬡  Registrar tienda",
@@ -93,7 +86,6 @@ def _render_store_form(api, store=None):
         "direccion": direccion,
         "fecha_apertura": fecha_apertura,
         "password": password,
-        "estado": estado,
         "form_seed": form_seed,
         "form_kind": form_kind,
     }
@@ -150,23 +142,24 @@ def render_tiendas(api):
         st.info("No se encontraron tiendas.")
         return
 
-    # Envolvemos toda la lista y encabezados en un único contenedor unificado (Panel responsivo)
     with st.container(border=True):
-        st.markdown("<div style='margin-bottom:15px;'><span class='section-header__title'>Lista de tiendas</span></div>", unsafe_allow_html=True)
-        
-        # Cabecera de la tabla dentro del contenedor para mantener alineación responsiva
-        headers = ["TIENDA", "ID", "CORREO", "DIRECCIÓN", "ESTADO", "", ""]
-        cols_head = st.columns([2.5, 1.4, 1.6, 1.8, 1, 0.6, 0.6])
+        st.markdown(
+            "<div style='margin-bottom:15px;'><span class='section-header__title'>Lista de tiendas</span></div>",
+            unsafe_allow_html=True,
+        )
+
+        headers = ["TIENDA", "CORREO", "CONTRASEÑA", "DIRECCIÓN", "ESTADO", "", ""]
+        cols_head = st.columns([2.5, 1.8, 1.6, 1.8, 1.0, 0.6, 0.6])
         for col, header in zip(cols_head, headers):
             col.markdown(f"<span class='table-header'>{header}</span>", unsafe_allow_html=True)
-        
+
         st.markdown("<hr style='margin:0.8rem 0; border-color:#e2e8f0; opacity:0.8;'>", unsafe_allow_html=True)
 
         for i, store in enumerate(tiendas):
             if i > 0:
                 st.markdown("<hr style='margin:0.5rem 0; border-color:#f1f5f9; opacity:0.6;'>", unsafe_allow_html=True)
-            
-            col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1.4, 1.6, 1.8, 1, 0.6, 0.6])
+
+            col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1.8, 1.6, 1.8, 1.0, 0.6, 0.6])
 
             with col1:
                 st.markdown(
@@ -179,14 +172,13 @@ def render_tiendas(api):
                     unsafe_allow_html=True,
                 )
             with col2:
-                st.caption(str(store.get("id_tienda", "—")))
-            with col3:
                 st.caption(str(store.get("correo", "—")))
+            with col3:
+                st.caption(str(store.get("contrasena", "—")))
             with col4:
                 st.caption(str(store.get("direccion", "—")))
             with col5:
                 st.markdown(_badge_estado(store.get("estado", True)), unsafe_allow_html=True)
-
             with col6:
                 estado_actual = bool(store.get("estado", True))
                 emoji = "🟢" if estado_actual else "🔴"
@@ -204,14 +196,12 @@ def render_tiendas(api):
                     except Exception as exc:
                         st.session_state["store_success_message"] = f"Error: {exc}"
                     st.rerun()
-
             with col7:
-                if st.button("🖍", key=f"edit_store_{store['id_tienda']}", help="Editar", use_container_width=True):
+                if st.button("🖍", key=f"edit_store_{store['id_tienda']}", help="Editar tienda", use_container_width=True):
                     st.session_state["store_form_mode"] = "edit"
                     st.session_state["store_id_editar"] = store["id_tienda"]
                     st.rerun()
 
-    # Formulario de edición fuera de la lista para mantener la estructura de panel limpia
     if st.session_state.get("store_form_mode") == "edit" and st.session_state.get("store_id_editar"):
         store_to_edit = next((s for s in tiendas if s["id_tienda"] == st.session_state["store_id_editar"]), None)
         if store_to_edit:
@@ -249,12 +239,12 @@ def _handle_store_create(api, form):
 
     store_data = {
         "correo": api.normalize_email(form["correo"]),
-        "contrasena": api.hash_password(form["password"]),
+        "contrasena": str(form["password"] or ""),
         "nombre": form["nombre_tienda"].strip(),
         "telefono": form["telefono"].strip(),
         "direccion": form["direccion"].strip(),
         "fecha_apertura": form["fecha_apertura"].isoformat() if form["fecha_apertura"] else None,
-        "estado": bool(form["estado"]),
+        "estado": True,
     }
     api.create_store_with_qr(store_id, store_data)
     st.cache_data.clear()
@@ -279,10 +269,10 @@ def _handle_store_update(api, store, form):
         "telefono": form["telefono"].strip(),
         "direccion": form["direccion"].strip(),
         "fecha_apertura": form["fecha_apertura"].isoformat() if form["fecha_apertura"] else None,
-        "estado": bool(form["estado"]),
+        "estado": True if store.get("estado", True) else False,
     }
     if form["password"].strip():
-        store_data["contrasena"] = api.hash_password(form["password"])
+        store_data["contrasena"] = str(form["password"])
 
     api.update_document(api.STORE_COLLECTION, store["id_tienda"], store_data, key_field="id_tienda")
     st.cache_data.clear()

@@ -1,5 +1,7 @@
 from calendar import monthrange
 from datetime import date, datetime, time
+import re
+import textwrap
 
 import streamlit as st
 
@@ -213,6 +215,206 @@ def _schedule_rows_view(horarios):
     ]
 
 
+def _safe_text(value):
+    text = str(value or "")
+    return text.replace("\r", " ").replace("\n", " ").strip()
+
+
+def _sanitize_filename(text):
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", _safe_text(text).lower()).strip("_")
+    return safe or "reporte"
+
+
+def _wrap_pdf_text(value, max_width):
+    text = _safe_text(value)
+    if not text:
+        return [""]
+    return textwrap.wrap(text, width=max_width, break_long_words=False, break_on_hyphens=False) or [text]
+
+
+def _pdf_escape_text(value):
+    return _safe_text(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+def _build_workers_pdf(workers, tienda_label, search_query):
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+    from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+    from io import BytesIO
+    from datetime import datetime
+
+    # ── Paleta ────────────────────────────────────────────────────
+    C_BLACK      = colors.HexColor("#0f172a")
+    C_DARK       = colors.HexColor("#1e293b")
+    C_MID        = colors.HexColor("#64748b")
+    C_LIGHT      = colors.HexColor("#f1f5f9")
+    C_WHITE      = colors.white
+    C_HEADER_BG  = colors.HexColor("#1e3a5f")  # azul oscuro — header tabla
+    C_ROW_ALT    = colors.HexColor("#f8fafc")  # fila alternada
+    C_ACCENT     = colors.HexColor("#2563eb")
+    C_GREEN_BG   = colors.HexColor("#dcfce7")
+    C_GREEN_TEXT = colors.HexColor("#166534")
+    C_RED_BG     = colors.HexColor("#fee2e2")
+    C_RED_TEXT   = colors.HexColor("#991b1b")
+
+    # ── Estilos ───────────────────────────────────────────────────
+    sty_title = ParagraphStyle("title",
+        fontName="Helvetica-Bold", fontSize=18,
+        textColor=C_BLACK, spaceAfter=2*mm)
+
+    sty_subtitle = ParagraphStyle("subtitle",
+        fontName="Helvetica", fontSize=9,
+        textColor=C_DARK, spaceAfter=1*mm)
+
+    sty_meta_lbl = ParagraphStyle("meta_lbl",
+        fontName="Helvetica-Bold", fontSize=8, textColor=C_BLACK)
+
+    sty_meta_val = ParagraphStyle("meta_val",
+        fontName="Helvetica", fontSize=8, textColor=C_DARK)
+
+    sty_footer = ParagraphStyle("footer",
+        fontName="Helvetica", fontSize=7,
+        textColor=C_MID, alignment=TA_RIGHT)
+
+    sty_th = ParagraphStyle("th",
+        fontName="Helvetica-Bold", fontSize=8,
+        textColor=C_WHITE, leading=10)
+
+    sty_cell = ParagraphStyle("cell",
+        fontName="Helvetica", fontSize=8,
+        textColor=C_BLACK, leading=10)
+
+    sty_cell_bold = ParagraphStyle("cell_bold",
+        fontName="Helvetica-Bold", fontSize=8,
+        textColor=C_BLACK, leading=10)
+
+    sty_active = ParagraphStyle("active",
+        fontName="Helvetica-Bold", fontSize=7.5,
+        textColor=C_GREEN_TEXT, leading=10)
+
+    sty_inactive = ParagraphStyle("inactive",
+        fontName="Helvetica-Bold", fontSize=7.5,
+        textColor=C_RED_TEXT, leading=10)
+
+    # ── Stats ─────────────────────────────────────────────────────
+    activos   = sum(1 for w in workers if w.get("estado", True))
+    inactivos = len(workers) - activos
+    tienda_text   = tienda_label if tienda_label != "Todas" else "Todas las tiendas"
+    generated_at  = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=15*mm, rightMargin=15*mm,
+        topMargin=15*mm,  bottomMargin=15*mm,
+    )
+
+    story = []
+
+    # ── TÍTULO ────────────────────────────────────────────────────
+    story.append(Paragraph("Reporte de Trabajadores", sty_title))
+    story.append(Paragraph(f"Generado: {generated_at}", sty_subtitle))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=C_ACCENT, spaceAfter=3*mm))
+
+    # ── METADATOS ─────────────────────────────────────────────────
+    meta = [
+        [Paragraph("<b>Tienda</b>", sty_meta_lbl),
+         Paragraph(tienda_text, sty_meta_val),
+         Paragraph("<b>Búsqueda activa</b>", sty_meta_lbl),
+         Paragraph(search_query or "—", sty_meta_val)],
+
+        [Paragraph("<b>Total trabajadores</b>", sty_meta_lbl),
+         Paragraph(str(len(workers)), sty_meta_val),
+         Paragraph("<b>Activos / Inactivos</b>", sty_meta_lbl),
+         Paragraph(f"{activos} activos  ·  {inactivos} inactivos", sty_meta_val)],
+    ]
+    meta_table = Table(meta, colWidths=[38*mm, 80*mm, 42*mm, 60*mm])
+    meta_table.setStyle(TableStyle([
+        ("ROWBACKGROUNDS", (0, 0), (-1, -1), [C_WHITE, C_LIGHT]),
+        ("BOX",            (0, 0), (-1, -1), 0.5, C_MID),
+        ("INNERGRID",      (0, 0), (-1, -1), 0.25, C_MID),
+        ("TOPPADDING",     (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING",  (0, 0), (-1, -1), 3),
+        ("LEFTPADDING",    (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING",   (0, 0), (-1, -1), 5),
+        ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(meta_table)
+    story.append(Spacer(1, 4*mm))
+
+    # ── TABLA PRINCIPAL ───────────────────────────────────────────
+    headers = [
+        Paragraph("N°",           sty_th),
+        Paragraph("Trabajador",   sty_th),
+        Paragraph("DNI",          sty_th),
+        Paragraph("Correo",       sty_th),
+        Paragraph("Cargo",        sty_th),
+        Paragraph("Tienda",       sty_th),
+        Paragraph("Teléfono",     sty_th),
+        Paragraph("Sueldo",       sty_th),
+        Paragraph("Estado",       sty_th),
+    ]
+    col_widths = [10*mm, 55*mm, 22*mm, 55*mm, 28*mm, 45*mm, 28*mm, 20*mm, 22*mm]
+
+    table_rows = [headers]
+    for i, worker in enumerate(workers, 1):
+        estado   = bool(worker.get("estado", True))
+        sueldo   = worker.get("sueldo")
+        sueldo_s = f"S/ {float(sueldo):,.2f}" if sueldo else "—"
+
+        table_rows.append([
+            Paragraph(str(i), sty_cell),
+            Paragraph(_safe_text(worker.get("nombre_trabajador", "")), sty_cell_bold),
+            Paragraph(_safe_text(worker.get("dni", "")),               sty_cell),
+            Paragraph(_safe_text(worker.get("correo", "")),            sty_cell),
+            Paragraph(_safe_text(worker.get("area") or worker.get("cargo", "")), sty_cell),
+            Paragraph(_safe_text(worker.get("nombre_sede", "")),       sty_cell),
+            Paragraph(_safe_text(worker.get("telefono", "")),          sty_cell),
+            Paragraph(sueldo_s,                                         sty_cell),
+            Paragraph("ACTIVO" if estado else "INACTIVO",
+                      sty_active if estado else sty_inactive),
+        ])
+
+    main_table = Table(table_rows, colWidths=col_widths, repeatRows=1)
+
+    # Estilo base
+    ts = TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, 0),  C_HEADER_BG),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [C_WHITE, C_ROW_ALT]),
+        ("BOX",           (0, 0), (-1, -1), 0.5, C_MID),
+        ("INNERGRID",     (0, 0), (-1, -1), 0.25, C_MID),
+        ("TOPPADDING",    (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+    ])
+
+    # Colorear fila según estado
+    for idx, worker in enumerate(workers, 1):
+        if not worker.get("estado", True):
+            ts.add("BACKGROUND", (0, idx), (-1, idx), C_RED_BG)
+        elif idx % 2 == 0:
+            ts.add("BACKGROUND", (0, idx), (-1, idx), C_ROW_ALT)
+
+    main_table.setStyle(ts)
+    story.append(main_table)
+
+    # ── PIE ───────────────────────────────────────────────────────
+    story.append(Spacer(1, 4*mm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=C_MID))
+    story.append(Paragraph(
+        f"Generado el {generated_at}  ·  {len(workers)} trabajadores  ·  {activos} activos  ·  {inactivos} inactivos",
+        sty_footer,
+    ))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.read()
+
 def _render_worker_form(api, worker=None):
     tiendas = api.get_tiendas()
     if not tiendas:
@@ -373,7 +575,7 @@ def _render_worker_form(api, worker=None):
         "dni": doc_id,
         "id_tienda": tienda["id_tienda"],
         "correo": api.normalize_email(correo),
-        "contrasena": api.hash_password(password_value) if password_value else stored_password,
+        "contrasena": password_value if password_value else stored_password,
         "nombre": nombre.strip(),
         "cargo": cargo.strip(),
         "sueldo": float(sueldo) if sueldo is not None else None,
@@ -467,50 +669,61 @@ def render_trabajadores(api):
             or query in (worker.get("area", "") or "").lower()
         ]
 
-    if not trabajadores:
+    filtered_workers = list(trabajadores)
+
+    if not filtered_workers:
         st.info("No se encontraron trabajadores.")
         return
+
+    export_col_1, export_col_2 = st.columns([1.05, 1.35])
+    export_col_1.caption("Exporta en PDF la lista filtrada de trabajadores.")
+    pdf_bytes = _build_workers_pdf(filtered_workers, tienda_filtro, busqueda)
+    pdf_name = f"trabajadores_{_sanitize_filename(tienda_filtro)}.pdf"
+    export_col_2.download_button(
+        "Exportar PDF",
+        data=pdf_bytes,
+        file_name=pdf_name,
+        mime="application/pdf",
+        use_container_width=True,
+    )
 
     # Envolvemos toda la lista y encabezados en un único contenedor unificado (Panel responsivo)
     with st.container(border=True):
         st.markdown("<div style='margin-bottom:15px;'><span class='section-header__title'>Lista de trabajadores</span></div>", unsafe_allow_html=True)
         
         # Cabecera de la tabla dentro del contenedor para mantener alineación responsiva
-        headers = ["TRABAJADOR", "DNI", "CARGO", "TIENDA", "ESTADO", "", ""]
-        col_h = st.columns([2.5, 1.2, 1.2, 1.2, 1, 0.6, 0.6])
+        headers = ["TRABAJADOR", "CORREO", "CONTRASEÑA", "CARGO", "ESTADO", "", ""]
+        col_h = st.columns([2.6, 1.7, 1.7, 1.2, 1, 0.6, 0.6])
         for col, header in zip(col_h, headers):
             col.markdown(f"<span class='table-header'>{header}</span>", unsafe_allow_html=True)
             
         st.markdown("<hr style='margin:0.8rem 0; border-color:#e2e8f0; opacity:0.8;'>", unsafe_allow_html=True)
 
-        for i, worker in enumerate(trabajadores):
+        for i, worker in enumerate(filtered_workers):
             if i > 0:
                 st.markdown("<hr style='margin:0.5rem 0; border-color:#f1f5f9; opacity:0.6;'>", unsafe_allow_html=True)
             
-            col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1.2, 1.2, 1.2, 1, 0.6, 0.6])
+            col1, col2, col3, col4, col5, col6, col7 = st.columns([2.6, 1.7, 1.7, 1.2, 1, 0.6, 0.6])
 
             with col1:
                 nombre = worker.get("nombre_trabajador", "-")
-                alias = worker.get("nombre_sede", "") or ""
                 st.markdown(
                     f"""
                     <div>
                         <div class="row-main">{nombre}</div>
-                        <div class="row-sub">{alias}</div>
                     </div>
                     """,
                     unsafe_allow_html=True
                 )
 
             with col2:
-                st.caption(str(worker.get("dni", "-")))
+                st.caption(str(worker.get("correo", "-")))
             
             with col3:
-                # Usamos el cargo asignado para el badge
-                st.markdown(_badge_cargo(worker.get("area", worker.get("cargo", ""))), unsafe_allow_html=True)
+                st.caption(str(worker.get("contrasena", "-")))
             
             with col4:
-                st.caption(str(worker.get("nombre_sede", "-")))
+                st.markdown(_badge_cargo(worker.get("area", worker.get("cargo", ""))), unsafe_allow_html=True)
             
             with col5:
                 st.markdown(_badge_estado(worker.get("estado", True)), unsafe_allow_html=True)
