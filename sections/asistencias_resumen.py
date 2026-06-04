@@ -185,7 +185,6 @@ def _collect_period_rows(asistencias, workers, start_date, end_date, schedule_ma
 # ================================================================
 #  PDF CON REPORTLAB
 # ================================================================
-
 def _build_attendance_pdf(period_label, selected_store_label, search_query,
                            workers, rows, start_date, end_date, tiendas=None):
     from reportlab.lib.pagesizes import A4, landscape
@@ -194,180 +193,272 @@ def _build_attendance_pdf(period_label, selected_store_label, search_query,
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.platypus import (
         SimpleDocTemplate, Table, TableStyle,
-        Paragraph, Spacer, HRFlowable,
+        Paragraph, Spacer, HRFlowable, KeepTogether,
     )
-    from reportlab.lib.enums import TA_RIGHT
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER
     from io import BytesIO
+    from datetime import timedelta
 
+    # ── Paleta ────────────────────────────────────────────────────
     C_BLACK      = colors.HexColor("#0f172a")
     C_DARK       = colors.HexColor("#1e293b")
     C_MID        = colors.HexColor("#64748b")
     C_LIGHT      = colors.HexColor("#f1f5f9")
     C_WHITE      = colors.white
-    C_HEADER_BG  = colors.HexColor("#1e3a5f")
-    C_ROW_ALT    = colors.HexColor("#f8fafc")
+    C_HEADER_BG  = colors.HexColor("#1e3a5f")   # azul oscuro — header tabla
+    C_WEEK_BG    = colors.HexColor("#dbeafe")    # azul claro — cabecera semana
+    C_WEEK_TEXT  = colors.HexColor("#1e40af")    # azul semana texto
+    C_ROW_ALT    = colors.HexColor("#f8fafc")    # fila alternada
     C_ACCENT     = colors.HexColor("#2563eb")
     C_GREEN_TEXT = colors.HexColor("#166534")
     C_RED_TEXT   = colors.HexColor("#991b1b")
     C_RED_BG     = colors.HexColor("#fff0f0")
+    C_SAT_BG     = colors.HexColor("#fefce8")    # amarillo suave — sábado
+    C_ABSENT_BG  = colors.HexColor("#f1f5f9")    # gris — falta
 
-    def sty(name, font="Helvetica", size=8, color=None, bold=False, align=None, leading=10):
-        kw = dict(fontName="Helvetica-Bold" if bold else font,
-                  fontSize=size, textColor=color or C_BLACK, leading=leading)
+    # ── Estilos ───────────────────────────────────────────────────
+    def sty(name, font="Helvetica", size=8, color=None, bold=False,
+            align=None, leading=10, italic=False):
+        fn = "Helvetica-BoldOblique" if bold and italic else \
+             "Helvetica-Bold" if bold else \
+             "Helvetica-Oblique" if italic else font
+        kw = dict(fontName=fn, fontSize=size,
+                  textColor=color or C_BLACK, leading=leading)
         if align:
             kw["alignment"] = align
         return ParagraphStyle(name, **kw)
 
-    sty_title    = sty("title",  bold=True,  size=18, leading=22)
-    sty_subtitle = sty("sub",    size=9,     color=C_DARK, leading=12)
-    sty_footer   = sty("foot",   size=7,     color=C_MID,  align=TA_RIGHT, leading=9)
-    sty_ml       = sty("ml",     bold=True,  size=8)
-    sty_mv       = sty("mv",     size=8,     color=C_DARK)
-    sty_sec      = sty("sec",    bold=True,  size=10, color=C_ACCENT, leading=14)
-    sty_th       = sty("th",     bold=True,  size=8,  color=C_WHITE)
-    sty_cell     = sty("cell",   size=7.5)
-    sty_bold     = sty("bold",   bold=True,  size=7.5)
-    sty_late     = sty("late",   bold=True,  size=7.5, color=C_RED_TEXT)
-    sty_ok       = sty("ok",     bold=True,  size=7.5, color=C_GREEN_TEXT)
+    sty_title    = sty("title",  bold=True,  size=16, leading=20)
+    sty_subtitle = sty("sub",    size=8,     color=C_DARK, leading=11)
+    sty_footer   = sty("foot",   size=6.5,   color=C_MID, align=TA_RIGHT, leading=9)
+    sty_ml       = sty("ml",     bold=True,  size=7.5)
+    sty_mv       = sty("mv",     size=7.5,   color=C_DARK)
+    sty_th       = sty("th",     bold=True,  size=7.5, color=C_WHITE, align=TA_CENTER)
+    sty_th_l     = sty("thl",    bold=True,  size=7.5, color=C_WHITE)
+    sty_week_hd  = sty("wk",     bold=True,  size=8,   color=C_WEEK_TEXT)
+    sty_cell     = sty("cell",   size=7,     color=C_BLACK)
+    sty_cell_c   = sty("cellc",  size=7,     color=C_BLACK, align=TA_CENTER)
+    sty_bold     = sty("bold",   bold=True,  size=7,   color=C_BLACK)
+    sty_late     = sty("late",   bold=True,  size=6.5, color=C_RED_TEXT, align=TA_CENTER)
+    sty_ok       = sty("ok",     bold=True,  size=6.5, color=C_GREEN_TEXT, align=TA_CENTER)
+    sty_absent   = sty("abs",    italic=True,size=6.5, color=C_MID, align=TA_CENTER)
+    sty_num      = sty("num",    size=7,     color=C_MID, align=TA_CENTER)
 
+    # ── Helpers ───────────────────────────────────────────────────
+    def fmt_time(val):
+        if not val or str(val).strip() in ("", "None", "--"):
+            return ""
+        s = str(val).strip()
+        if "T" in s: s = s.split("T")[-1]
+        if " " in s: s = s.split(" ")[-1]
+        return s[:5]
+
+    def cell_marcaciones(row_data):
+        """Devuelve un Paragraph con hasta 4 marcaciones apiladas."""
+        if row_data is None:
+            return Paragraph("Falta", sty_absent)
+        e  = fmt_time(row_data.get("hora_inicio"))
+        r1 = fmt_time(row_data.get("inicio_receso"))
+        r2 = fmt_time(row_data.get("final_receso"))
+        s  = fmt_time(row_data.get("hora_final"))
+        is_late = bool(row_data.get("late"))
+
+        parts = []
+        if e:
+            color = "#991b1b" if is_late else "#166534"
+            parts.append(f'<font color="{color}"><b>{e}</b></font>')
+        if r1:
+            parts.append(f'<font color="#92400e">{r1}</font>')
+        if r2:
+            parts.append(f'<font color="#5b21b6">{r2}</font>')
+        if s:
+            parts.append(f'<font color="#1d4ed8">{s}</font>')
+        if not parts:
+            return Paragraph("—", sty_absent)
+        return Paragraph("<br/>".join(parts), sty_cell_c)
+
+    # ── Organizar datos ───────────────────────────────────────────
+    # índice: dni → fecha → row
+    from collections import defaultdict
+    att_index = defaultdict(dict)
+    for row in rows:
+        try:
+            d = date.fromisoformat(str(row.get("fecha", ""))[:10])
+        except ValueError:
+            continue
+        dni = str(row.get("dni", "")).strip()
+        att_index[dni][d] = row
+
+    # semanas dentro del periodo (lunes a sábado)
+    def get_weeks(start, end):
+        weeks = []
+        cursor = start - timedelta(days=start.weekday())  # lunes de la semana
+        week_num = 1
+        while cursor <= end:
+            days = []
+            for i in range(6):  # lunes=0 ... sábado=5
+                d = cursor + timedelta(days=i)
+                if start <= d <= end:
+                    days.append(d)
+            if days:
+                weeks.append((week_num, days))
+                week_num += 1
+            cursor += timedelta(days=7)
+        return weeks
+
+    weeks = get_weeks(start_date, end_date)
+
+    # ── Stats generales ───────────────────────────────────────────
     generated_at  = datetime.now().strftime("%d/%m/%Y %H:%M")
     store_label   = selected_store_label if selected_store_label != "Todas" else "Todas las tiendas"
     tardanzas     = sum(1 for r in rows if r.get("late"))
     puntual_count = len(rows) - tardanzas
 
+    # ── Documento ─────────────────────────────────────────────────
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4),
-                            leftMargin=15*mm, rightMargin=15*mm,
-                            topMargin=15*mm,  bottomMargin=15*mm)
+    doc = SimpleDocTemplate(
+        buffer, pagesize=landscape(A4),
+        leftMargin=10*mm, rightMargin=10*mm,
+        topMargin=12*mm,  bottomMargin=12*mm,
+    )
     story = []
 
-    # TITULO
+    # ── TÍTULO ────────────────────────────────────────────────────
     story.append(Paragraph("Reporte de Asistencias", sty_title))
     story.append(Paragraph(
-        f"Periodo: <b>{period_label}</b>  ·  Generado: {generated_at}", sty_subtitle))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=C_ACCENT, spaceAfter=3*mm))
+        f"Periodo: <b>{period_label}</b>  ·  "
+        f"Rango: {start_date.strftime('%d/%m/%Y')} — {end_date.strftime('%d/%m/%Y')}  ·  "
+        f"Generado: {generated_at}", sty_subtitle))
+    story.append(HRFlowable(width="100%", thickness=1.2, color=C_ACCENT, spaceAfter=2*mm))
 
-    # METADATOS
+    # ── METADATOS ─────────────────────────────────────────────────
     meta = [
-        [Paragraph("<b>Tienda</b>", sty_ml), Paragraph(store_label, sty_mv),
-         Paragraph("<b>Periodo</b>", sty_ml), Paragraph(period_label, sty_mv)],
-        [Paragraph("<b>Rango</b>", sty_ml),
-         Paragraph(f"{start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}", sty_mv),
-         Paragraph("<b>Busqueda</b>", sty_ml), Paragraph(search_query or "-", sty_mv)],
-        [Paragraph("<b>Trabajadores</b>", sty_ml), Paragraph(str(len(workers)), sty_mv),
-         Paragraph("<b>Registros</b>", sty_ml), Paragraph(str(len(rows)), sty_mv)],
-        [Paragraph("<b>A tiempo</b>", sty_ml), Paragraph(str(puntual_count), sty_mv),
-         Paragraph("<b>Tardanzas</b>", sty_ml), Paragraph(str(tardanzas), sty_mv)],
+        [Paragraph("<b>Tienda</b>",       sty_ml), Paragraph(store_label,        sty_mv),
+         Paragraph("<b>Trabajadores</b>", sty_ml), Paragraph(str(len(workers)),  sty_mv),
+         Paragraph("<b>Registros</b>",    sty_ml), Paragraph(str(len(rows)),     sty_mv)],
+        [Paragraph("<b>Busqueda</b>",     sty_ml), Paragraph(search_query or "—", sty_mv),
+         Paragraph("<b>A tiempo</b>",     sty_ml), Paragraph(str(puntual_count), sty_mv),
+         Paragraph("<b>Tardanzas</b>",    sty_ml), Paragraph(str(tardanzas),     sty_mv)],
     ]
-    meta_t = Table(meta, colWidths=[32*mm, 88*mm, 32*mm, 68*mm])
+    meta_t = Table(meta, colWidths=[22*mm, 68*mm, 28*mm, 22*mm, 24*mm, 22*mm])
     meta_t.setStyle(TableStyle([
         ("ROWBACKGROUNDS", (0,0), (-1,-1), [C_WHITE, C_LIGHT]),
-        ("BOX",           (0,0), (-1,-1), 0.5, C_MID),
-        ("INNERGRID",     (0,0), (-1,-1), 0.25, C_MID),
-        ("TOPPADDING",    (0,0), (-1,-1), 3),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
-        ("LEFTPADDING",   (0,0), (-1,-1), 5),
-        ("RIGHTPADDING",  (0,0), (-1,-1), 5),
-        ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+        ("BOX",            (0,0), (-1,-1), 0.5, C_MID),
+        ("INNERGRID",      (0,0), (-1,-1), 0.25, C_MID),
+        ("TOPPADDING",     (0,0), (-1,-1), 2),
+        ("BOTTOMPADDING",  (0,0), (-1,-1), 2),
+        ("LEFTPADDING",    (0,0), (-1,-1), 4),
+        ("RIGHTPADDING",   (0,0), (-1,-1), 4),
+        ("VALIGN",         (0,0), (-1,-1), "MIDDLE"),
     ]))
     story.append(meta_t)
+    story.append(Spacer(1, 3*mm))
 
-    # RESUMEN POR TIENDA
-    if tiendas and len(tiendas) > 1:
-        story.append(Paragraph("Resumen por tienda", sty_sec))
-        tstats = {}
-        for r in rows:
-            sede = _safe_text(r.get("nombre_sede", "Sin tienda"))
-            tstats.setdefault(sede, {"total": 0, "tarde": 0, "workers": set()})
-            tstats[sede]["total"] += 1
-            tstats[sede]["workers"].add(r.get("dni", ""))
-            if r.get("late"):
-                tstats[sede]["tarde"] += 1
+    # ── LEYENDA ───────────────────────────────────────────────────
+    leyenda_data = [[
+        Paragraph("<b>Leyenda de marcaciones:</b>", sty_ml),
+        Paragraph('<font color="#166534"><b>Entrada (puntual)</b></font>', sty_cell),
+        Paragraph('<font color="#991b1b"><b>Entrada (tardanza)</b></font>', sty_cell),
+        Paragraph('<font color="#92400e">Inicio receso</font>', sty_cell),
+        Paragraph('<font color="#5b21b6">Fin receso</font>', sty_cell),
+        Paragraph('<font color="#1d4ed8">Salida</font>', sty_cell),
+    ]]
+    ley_t = Table(leyenda_data, colWidths=[38*mm, 38*mm, 38*mm, 32*mm, 28*mm, 26*mm])
+    ley_t.setStyle(TableStyle([
+        ("BOX",           (0,0), (-1,-1), 0.4, C_MID),
+        ("TOPPADDING",    (0,0), (-1,-1), 2),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+        ("LEFTPADDING",   (0,0), (-1,-1), 4),
+        ("BACKGROUND",    (0,0), (-1,-1), C_LIGHT),
+        ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+    ]))
+    story.append(ley_t)
+    story.append(Spacer(1, 4*mm))
 
-        thead = [Paragraph(h, sty_th) for h in
-                 ["Tienda","Trabajadores","Registros","A tiempo","Tardanzas","% Puntualidad"]]
-        trows = [thead]
-        for nombre, s in sorted(tstats.items()):
-            pct = round((s["total"] - s["tarde"]) / s["total"] * 100) if s["total"] else 0
-            trows.append([
-                Paragraph(nombre, sty_cell),
-                Paragraph(str(len(s["workers"])), sty_cell),
-                Paragraph(str(s["total"]), sty_cell),
-                Paragraph(str(s["total"] - s["tarde"]), sty_ok),
-                Paragraph(str(s["tarde"]), sty_late if s["tarde"] else sty_cell),
-                Paragraph(f"{pct}%", sty_bold),
-            ])
-        st2 = Table(trows, colWidths=[70*mm, 28*mm, 26*mm, 26*mm, 26*mm, 34*mm])
-        st2.setStyle(TableStyle([
+    # ── TABLAS POR SEMANA ─────────────────────────────────────────
+    DAY_NAMES = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
+
+    for week_num, week_days in weeks:
+        # encabezado de semana
+        week_start_str = week_days[0].strftime("%d/%m")
+        week_end_str   = week_days[-1].strftime("%d/%m")
+        story.append(Paragraph(
+            f"Semana {week_num}  ·  {week_start_str} — {week_end_str}",
+            sty_week_hd,
+        ))
+
+        # fechas del header (solo los días presentes en la semana)
+        day_headers = [
+            f"{DAY_NAMES[d.weekday()]}\n{d.strftime('%d/%m')}"
+            for d in week_days
+        ]
+
+        # anchos: N° + Trabajador + días
+        n_days    = len(week_days)
+        day_w     = (246 - 8 - 42) / n_days  # distribuir espacio disponible
+        col_ws    = [8*mm, 42*mm] + [day_w*mm] * n_days
+
+        # header row
+        header_row = [
+            Paragraph("N°",         sty_th),
+            Paragraph("Trabajador", sty_th_l),
+        ] + [Paragraph(h.replace("\n", "<br/>"), sty_th) for h in day_headers]
+
+        # filas de trabajadores
+        table_rows = [header_row]
+        style_cmds = [
             ("BACKGROUND",    (0,0), (-1,0),  C_HEADER_BG),
-            ("ROWBACKGROUNDS",(0,1), (-1,-1), [C_WHITE, C_ROW_ALT]),
             ("BOX",           (0,0), (-1,-1), 0.5, C_MID),
             ("INNERGRID",     (0,0), (-1,-1), 0.25, C_MID),
-            ("TOPPADDING",    (0,0), (-1,-1), 3),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 3),
-            ("LEFTPADDING",   (0,0), (-1,-1), 4),
-            ("RIGHTPADDING",  (0,0), (-1,-1), 4),
+            ("TOPPADDING",    (0,0), (-1,-1), 2),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+            ("LEFTPADDING",   (0,0), (-1,-1), 3),
+            ("RIGHTPADDING",  (0,0), (-1,-1), 3),
             ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
-        ]))
-        story.append(st2)
+            ("ROWBACKGROUNDS",(0,1), (-1,-1), [C_WHITE, C_ROW_ALT]),
+        ]
 
-    # TABLA PRINCIPAL
-    story.append(Paragraph("Detalle de asistencias", sty_sec))
-    col_widths = [20*mm, 46*mm, 20*mm, 26*mm, 38*mm,
-                  18*mm, 20*mm, 20*mm, 18*mm, 20*mm]
-    headers = [Paragraph(h, sty_th) for h in
-               ["Fecha","Trabajador","DNI","Cargo","Tienda",
-                "Entrada","Ini.Receso","Fin Receso","Salida","Estado"]]
-    table_rows = [headers]
-    for row in rows:
-        is_late = bool(row.get("late"))
-        fecha_d = _parse_date(row.get("fecha"))
-        fecha_s = fecha_d.strftime("%d/%m/%Y") if fecha_d else _safe_text(row.get("fecha",""))
-        table_rows.append([
-            Paragraph(fecha_s,                                     sty_cell),
-            Paragraph(_safe_text(row.get("nombre_trabajador","")), sty_bold),
-            Paragraph(_safe_text(row.get("dni","")),               sty_cell),
-            Paragraph(_safe_text(row.get("cargo","")),             sty_cell),
-            Paragraph(_safe_text(row.get("nombre_sede","")),       sty_cell),
-            Paragraph(_safe_text(row.get("hora_inicio","--")),     sty_late if is_late else sty_cell),
-            Paragraph(_safe_text(row.get("inicio_receso","--")),   sty_cell),
-            Paragraph(_safe_text(row.get("final_receso","--")),    sty_cell),
-            Paragraph(_safe_text(row.get("hora_final","--")),      sty_cell),
-            Paragraph("TARDANZA" if is_late else "A TIEMPO",       sty_late if is_late else sty_ok),
-        ])
+        for row_idx, worker in enumerate(workers, 1):
+            dni    = str(worker.get("dni", "")).strip()
+            nombre = _safe_text(worker.get("nombre_trabajador", ""))
+            worker_att = att_index.get(dni, {})
 
-    ts = TableStyle([
-        ("BACKGROUND",    (0,0), (-1,0),  C_HEADER_BG),
-        ("ROWBACKGROUNDS",(0,1), (-1,-1), [C_WHITE, C_ROW_ALT]),
-        ("BOX",           (0,0), (-1,-1), 0.5, C_MID),
-        ("INNERGRID",     (0,0), (-1,-1), 0.25, C_MID),
-        ("TOPPADDING",    (0,0), (-1,-1), 3),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
-        ("LEFTPADDING",   (0,0), (-1,-1), 4),
-        ("RIGHTPADDING",  (0,0), (-1,-1), 4),
-        ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
-    ])
-    for idx, row in enumerate(rows, 1):
-        if row.get("late"):
-            ts.add("BACKGROUND", (0, idx), (-1, idx), C_RED_BG)
+            cells = [
+                Paragraph(str(row_idx), sty_num),
+                Paragraph(nombre,       sty_bold),
+            ]
 
-    main_t = Table(table_rows, colWidths=col_widths, repeatRows=1)
-    main_t.setStyle(ts)
-    story.append(main_t)
+            for col_idx, day in enumerate(week_days, 2):
+                row_data = worker_att.get(day)
+                cells.append(cell_marcaciones(row_data))
 
-    # PIE
-    story.append(Spacer(1, 4*mm))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=C_MID))
+                # colorear celda según estado
+                if row_data is None:
+                    style_cmds.append(("BACKGROUND", (col_idx, row_idx), (col_idx, row_idx), C_ABSENT_BG))
+                elif row_data.get("late"):
+                    style_cmds.append(("BACKGROUND", (col_idx, row_idx), (col_idx, row_idx), C_RED_BG))
+                elif day.weekday() == 5:  # sábado
+                    style_cmds.append(("BACKGROUND", (col_idx, row_idx), (col_idx, row_idx), C_SAT_BG))
+
+            table_rows.append(cells)
+
+        week_table = Table(table_rows, colWidths=col_ws, repeatRows=1)
+        week_table.setStyle(TableStyle(style_cmds))
+
+        story.append(KeepTogether([week_table]))
+        story.append(Spacer(1, 5*mm))
+
+    # ── PIE ───────────────────────────────────────────────────────
+    story.append(HRFlowable(width="100%", thickness=0.4, color=C_MID))
     story.append(Paragraph(
-        f"Generado el {generated_at}  |  {len(rows)} registros  |  "
-        f"{puntual_count} a tiempo  |  {tardanzas} tardanzas",
+        f"Generado el {generated_at}  |  {len(workers)} trabajadores  |  "
+        f"{len(rows)} registros  |  {puntual_count} a tiempo  |  {tardanzas} tardanzas",
         sty_footer,
     ))
 
     doc.build(story)
     buffer.seek(0)
     return buffer.read()
-
 
 # ================================================================
 #  HTML TABLA SEMANAL
