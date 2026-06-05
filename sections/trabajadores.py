@@ -512,6 +512,15 @@ def _render_worker_form(api, worker=None):
                 placeholder="Dejar vacio para mantener la actual",
                 key=f"{form_kind}_password_{form_seed}",
             )
+        password_label = "Contrasena *" if not worker else "Contrasena"
+        password_placeholder = "Ingresa una contrasena" if not worker else "Dejar vacio para mantener la actual"
+        password = col_2.text_input(
+            password_label,
+            value="",
+            type="password",
+            placeholder=password_placeholder,
+            key=f"{form_kind}_password_{form_seed}",
+        )
         telefono = col_2.text_input(
             "Telefono",
             value=worker.get("telefono", "") if worker else "",
@@ -559,6 +568,8 @@ def _render_worker_form(api, worker=None):
         missing = api.required_missing({"DNI": dni, "Nombre": nombre, "Tienda": tienda_label})
         if worker is None and not foto_dni:
             missing.append("Foto DNI")
+        if worker is None and not password:
+            missing.append("Contrasena")
         if not selected_days:
             missing.append("Dias laborables")
 
