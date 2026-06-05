@@ -159,31 +159,31 @@ def render_login():
         }}
 
         [data-testid="stTextInput"] input {{
-            background: rgba(255, 255, 255, 0.05) !important;
+            background: rgba(255, 255, 255, 0.85) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            color: #ffffff !important;
+            color: #000000 !important;
             border-radius: 12px !important;
             padding: 0.75rem 1rem !important;
         }}
 
         /* Botón de entrada */
         .stButton button {{
-            background: #ffffff !important;
-            color: #2563eb !important;
+            background: transparent !important;
+            color: #ffffff !important;
             font-family: 'Space Mono', monospace !important;
             font-weight: 700 !important;
             border-radius: 12px !important;
             padding: 0.75rem !important;
             margin-top: 1.5rem !important;
-            border: none !important;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2) !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37) !important;
             transition: all 0.3s ease !important;
         }}
 
         .stButton button:hover {{
-            background: #f8fafc !important;
+            background: rgba(255, 255, 255, 0.15) !important;
             transform: translateY(-2px) !important;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3) !important;
+            border-color: rgba(255, 255, 255, 0.4) !important;
         }}
         </style>
 
