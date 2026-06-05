@@ -692,7 +692,7 @@ def render_resumen(api=None):
 
     st.markdown("""
     <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.25rem;">
-        <div style="font-size:1.4rem;color:#2563eb;">â¬¡</div>
+        <div style="font-size:1.4rem;color:#2563eb;">¬</div>
         <div>
             <div style="font-family:'Space Mono',monospace;font-size:1.25rem;
                         letter-spacing:0.03em;color:#000000;line-height:1.1;">
@@ -700,7 +700,7 @@ def render_resumen(api=None):
             </div>
             <div style="font-size:0.78rem;color:#000000;font-family:'DM Sans',sans-serif;
                         margin-top:0.15rem;">
-                Vista semanal por trabajador Â· PostgreSQL
+                Vista semanal por trabajador.
             </div>
         </div>
     </div>
