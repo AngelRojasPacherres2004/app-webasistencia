@@ -62,13 +62,13 @@ def _render_store_form(api, store=None):
             key=f"{form_kind}_store_correo_{form_seed}",
         )
         telefono = col_1.text_input(
-            "TelÃ©fono",
+            "Telefono",
             value=store.get("telefono", "") if store else "",
             placeholder="+51 999 999 999",
             key=f"{form_kind}_store_telefono_{form_seed}",
         )
         direccion = col_2.text_input(
-            "DirecciÃ³n",
+            "Direccion",
             value=store.get("direccion", "") if store else "",
             placeholder="Av. Principal 123",
             key=f"{form_kind}_store_direccion_{form_seed}",
@@ -78,16 +78,17 @@ def _render_store_form(api, store=None):
             value=fecha_default,
             key=f"{form_kind}_store_fecha_{form_seed}",
         )
-        password = ""
-        if store:
-            password = col_2.text_input(
-                "Contrasena",
-                value="",
-                placeholder="Dejar vacio para mantener la actual",
-                key=f"{form_kind}_store_password_{form_seed}",
-            )
+        password_label = "Contrasena *" if not store else "Contrasena"
+        password_placeholder = "Ingresa una contrasena" if not store else "Dejar vacio para mantener la actual"
+        password = col_2.text_input(
+            password_label,
+            value="",
+            type="password",
+            placeholder=password_placeholder,
+            key=f"{form_kind}_store_password_{form_seed}",
+        )
         submitted = st.form_submit_button(
-            "Guardar cambios" if store else "â¬¡  Registrar tienda",
+            "Guardar cambios" if store else "Registrar tienda",
             use_container_width=True,
         )
 
@@ -179,7 +180,7 @@ def render_tiendas(api):
                     f"""
                     <div>
                         <div class="row-main">{store.get('nombre_tienda', 'â€”')}</div>
-                        <div class="row-sub">{store.get('telefono', '') or 'Sin telÃ©fono'}</div>
+                        <div class="row-sub">{store.get('telefono', '') or 'Sin Telefono'}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -238,9 +239,15 @@ def _handle_store_create(api, form):
         missing = api.required_missing({
             "Nombre tienda": form["nombre_tienda"],
             "Correo": form["correo"],
+            "Contrasena": form["password"],
         })
         if missing:
             st.error("Campos requeridos: " + ", ".join(missing))
+            return
+
+        password_error = _validate_password(form.get("password", ""))
+        if password_error:
+            st.error(password_error)
             return
 
         store_id = str(uuid4())
@@ -250,6 +257,7 @@ def _handle_store_create(api, form):
 
         store_data = {
             "correo": api.normalize_email(form["correo"]),
+            "contrasena": api.hash_password(form["password"]),
             "nombre": form["nombre_tienda"].strip(),
             "telefono": form["telefono"].strip(),
             "direccion": form["direccion"].strip(),
@@ -290,7 +298,7 @@ def _handle_store_update(api, store, form):
             "estado": True if store.get("estado", True) else False,
         }
         if str(form.get("password", "")).strip():
-            store_data["contrasena"] = str(form["password"]).strip()
+            store_data["contrasena"] = api.hash_password(form["password"])
 
         api.update_document(api.STORE_COLLECTION, store["id_tienda"], store_data, key_field="id_tienda")
         st.cache_data.clear()
@@ -301,5 +309,3 @@ def _handle_store_update(api, store, form):
         st.rerun()
     except Exception as exc:
         st.error(f"No se pudo guardar la tienda: {exc}")
-
-
