@@ -168,21 +168,22 @@ def render_login():
 
         /* Botón de entrada */
         .stButton button {{
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
-            color: white !important;
+            background: #ffffff !important;
+            color: #2563eb !important;
             font-family: 'Space Mono', monospace !important;
             font-weight: 700 !important;
             border-radius: 12px !important;
             padding: 0.75rem !important;
             margin-top: 1.5rem !important;
             border: none !important;
-            box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3) !important;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2) !important;
             transition: all 0.3s ease !important;
         }}
 
         .stButton button:hover {{
+            background: #f8fafc !important;
             transform: translateY(-2px) !important;
-            box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.4) !important;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3) !important;
         }}
         </style>
 
