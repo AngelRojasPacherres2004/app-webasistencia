@@ -118,6 +118,14 @@ def normalize_email(email):
     return str(email or "").strip().lower()
 
 
+def _as_bool_value(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "sí"}
+
+
 def format_time(value):
     if value is None or value == "" or value is False:
         return ""
@@ -200,6 +208,7 @@ def build_attendance_row(doc, data=None):
         "inicio_receso": format_time(data.get("horario_inicio_receso")),
         "final_receso": format_time(data.get("horario_fin_receso")),
         "hora_final": format_time(data.get("horario_salida")),
+        "justificado": _as_bool_value(data.get("justificado", data.get("JUSTIFICADO", False))),
         "ultima_marca": (
             "hora_final"
             if data.get("horario_salida")
@@ -527,41 +536,42 @@ def save_attendance_record(attendance_data):
 def tienda_form():
     section_header("Nueva tienda", "Registra una tienda en el sistema")
 
-    with st.form("create_store_form", clear_on_submit=True):
-        col_1, col_2 = st.columns(2)
-        nombre_tienda = col_1.text_input("Nombre tienda *", placeholder="Tienda Centro")
-        correo = col_1.text_input("Correo *", placeholder="tienda@empresa.com")
-        telefono = col_1.text_input("Teléfono", placeholder="+51 999 999 999")
-        direccion = col_2.text_input("Dirección", placeholder="Av. Principal 123")
-        fecha_apertura = col_2.date_input("Fecha apertura", value=None)
-        password = col_2.text_input("Contraseña *", type="password")
+    try:
+        with st.form("create_store_form", clear_on_submit=True):
+            col_1, col_2 = st.columns(2)
+            nombre_tienda = col_1.text_input("Nombre tienda *", placeholder="Tienda Centro")
+            correo = col_1.text_input("Correo *", placeholder="tienda@empresa.com")
+            telefono = col_1.text_input("Teléfono", placeholder="+51 999 999 999")
+            direccion = col_2.text_input("Dirección", placeholder="Av. Principal 123")
+            fecha_apertura = col_2.date_input("Fecha apertura", value=None)
 
-        submitted = st.form_submit_button("⬡  Registrar tienda", use_container_width=True)
+            submitted = st.form_submit_button("⬡  Registrar tienda", use_container_width=True)
 
-    if not submitted:
-        return
+        if not submitted:
+            return
 
-    missing = required_missing({
-        "Nombre tienda": nombre_tienda, "Correo": correo, "Contraseña": password,
-    })
-    if missing:
-        st.error("Campos requeridos: " + ", ".join(missing))
-        return
+        missing = required_missing({
+            "Nombre tienda": nombre_tienda, "Correo": correo,
+        })
+        if missing:
+            st.error("Campos requeridos: " + ", ".join(missing))
+            return
 
-    doc_id = str(uuid4())
+        doc_id = str(uuid4())
 
-    store_data = {
-        "correo": normalize_email(correo),
-        "contrasena": hash_password(password),
-        "nombre": nombre_tienda.strip(),
-        "telefono": telefono.strip(),
-        "direccion": direccion.strip(),
-        "fecha_apertura": fecha_apertura.isoformat() if fecha_apertura else None,
-        "estado": True,
-    }
-    qr_token = create_store_with_qr(doc_id, store_data)
-    st.success(f"✓  Tienda registrada → `{STORE_COLLECTION}/{doc_id}`")
-    st.caption(f"QR activo creado en `{QR_ACTIVE_COLLECTION}` - token `{qr_token}`")
+        store_data = {
+            "correo": normalize_email(correo),
+            "nombre": nombre_tienda.strip(),
+            "telefono": telefono.strip(),
+            "direccion": direccion.strip(),
+            "fecha_apertura": fecha_apertura.isoformat() if fecha_apertura else None,
+            "estado": True,
+        }
+        qr_token = create_store_with_qr(doc_id, store_data)
+        st.success(f"✓  Tienda registrada → `{STORE_COLLECTION}/{doc_id}`")
+        st.caption(f"QR activo creado en `{QR_ACTIVE_COLLECTION}` - token `{qr_token}`")
+    except Exception as exc:
+        st.error(f"No se pudo registrar la tienda: {exc}")
 
 
 def trabajador_form():
@@ -591,86 +601,83 @@ def trabajador_form():
     if not selected_days:
         st.warning("Selecciona al menos un día para el horario.")
 
-    with st.form(f"create_worker_form_{form_seed}", clear_on_submit=False):
-        col_1, col_2 = st.columns(2)
-        dni = col_1.text_input("DNI *", placeholder="12345678", key=f"worker_dni_{form_seed}")
-        nombre = col_1.text_input("Nombre completo *", placeholder="Juan Pérez", key=f"worker_nombre_{form_seed}")
-        cargo = col_1.text_input("Cargo", placeholder="Ventas", key=f"worker_cargo_{form_seed}")
-        sueldo = col_1.number_input("Sueldo", min_value=0.0, step=50.0, format="%.2f", key=f"worker_sueldo_{form_seed}")
-        correo = col_2.text_input("Correo", placeholder="juan@empresa.com", key=f"worker_correo_{form_seed}")
-        password = col_2.text_input("Contraseña", type="password", key=f"worker_password_{form_seed}")
-        telefono = col_2.text_input("Teléfono", placeholder="+51 999 999 999", key=f"worker_telefono_{form_seed}")
-        csi = col_2.text_input("CSI / código interno", placeholder="CSI-001", key=f"worker_csi_{form_seed}")
-        foto_dni = col_2.file_uploader(
-            "Foto DNI *",
-            type=["jpg", "jpeg", "png", "pdf"],
-            key=f"worker_foto_{form_seed}",
-        )
-        tienda_label      = st.selectbox(
-            "Tienda / sede asignada *",
-            options=list(tienda_options.keys()),
-            index=None,
-            placeholder="Selecciona una tienda",
-            key=f"worker_tienda_{form_seed}",
-        )
-        horario = build_schedule_inputs(selected_days, key_prefix=f"worker_{form_seed}")
-        submitted = st.form_submit_button("⬡  Registrar trabajador", use_container_width=True)
-
-    if not submitted:
-        return
-
-    missing = required_missing({
-        "DNI": dni, "Nombre": nombre, "Foto DNI": foto_dni,
-        "Tienda": tienda_label,
-    })
-    if not selected_days:
-        missing.append("Días laborables")
-
-    if missing:
-        st.error("Campos requeridos: " + ", ".join(missing))
-        return
-
-    doc_id = str(dni).strip()
-    if document_exists(WORKER_COLLECTION, doc_id):
-        st.error(f"Ya existe un trabajador con el ID `{doc_id}`.")
-        return
-
-    tienda = tienda_options[tienda_label]
     try:
-        uploaded_dni = upload_worker_file(foto_dni, doc_id)
-    except Exception as exc:
-        st.error(f"No se pudo subir el archivo a Cloudinary: {exc}")
-        return
+        with st.form(f"create_worker_form_{form_seed}", clear_on_submit=False):
+            col_1, col_2 = st.columns(2)
+            dni = col_1.text_input("DNI *", placeholder="12345678", key=f"worker_dni_{form_seed}")
+            nombre = col_1.text_input("Nombre completo *", placeholder="Juan Pérez", key=f"worker_nombre_{form_seed}")
+            cargo = col_1.text_input("Cargo", placeholder="Ventas", key=f"worker_cargo_{form_seed}")
+            sueldo = col_1.number_input("Sueldo", min_value=0.0, step=50.0, format="%.2f", key=f"worker_sueldo_{form_seed}")
+            correo = col_2.text_input("Correo", placeholder="juan@empresa.com", key=f"worker_correo_{form_seed}")
+            telefono = col_2.text_input("Teléfono", placeholder="+51 999 999 999", key=f"worker_telefono_{form_seed}")
+            csi = col_2.text_input("CSI / código interno", placeholder="CSI-001", key=f"worker_csi_{form_seed}")
+            foto_dni = col_2.file_uploader(
+                "Foto DNI *",
+                type=["jpg", "jpeg", "png", "pdf"],
+                key=f"worker_foto_{form_seed}",
+            )
+            tienda_label      = st.selectbox(
+                "Tienda / sede asignada *",
+                options=list(tienda_options.keys()),
+                index=None,
+                placeholder="Selecciona una tienda",
+                key=f"worker_tienda_{form_seed}",
+            )
+            horario = build_schedule_inputs(selected_days, key_prefix=f"worker_{form_seed}")
+            submitted = st.form_submit_button("⬡  Registrar trabajador", use_container_width=True)
 
-    worker_data = {
-        "dni": doc_id,
-        "id_tienda": tienda["id_tienda"],
-        "correo": normalize_email(correo),
-        "contrasena": hash_password(password),
-        "nombre": nombre.strip(),
-        "cargo": cargo.strip(),
-        "sueldo": float(sueldo) if sueldo is not None else None,
-        "telefono": telefono.strip(),
-        "csi": csi.strip(),
-        "foto_dni": uploaded_dni["secure_url"],
-        "estado": True,
-    }
-    create_document(WORKER_COLLECTION, doc_id, worker_data)
-    from supabase_backend import delete_rows, insert_document
-    delete_rows("horario_trabajador", [("dni_trabajador", "eq", doc_id)])
-    for day in selected_days:
-        schedule_item = horario.get(day, {})
-        insert_document("horario_trabajador", {
-            "dni_trabajador": doc_id,
-            "dia_semana": day,
-            "horario_entrada": schedule_item.get("hora_inicio") if schedule_item.get("hora_inicio") not in (None, "") else "00:00",
-            "horario_inicio_receso": schedule_item.get("inicio_receso") or None,
-            "horario_fin_receso": schedule_item.get("final_receso") or None,
-            "horario_salida": schedule_item.get("hora_final") if schedule_item.get("hora_final") not in (None, "") else "00:00",
+        if not submitted:
+            return
+
+        missing = required_missing({
+            "DNI": dni, "Nombre": nombre, "Foto DNI": foto_dni,
+            "Tienda": tienda_label,
         })
-    st.session_state["worker_success_message"] = f"✓  Trabajador registrado → `{WORKER_COLLECTION}/{doc_id}`"
-    st.session_state["worker_form_seed"] = form_seed + 1
-    st.rerun()
+        if not selected_days:
+            missing.append("Días laborables")
+
+        if missing:
+            st.error("Campos requeridos: " + ", ".join(missing))
+            return
+
+        doc_id = str(dni).strip()
+        if document_exists(WORKER_COLLECTION, doc_id):
+            st.error(f"Ya existe un trabajador con el ID `{doc_id}`.")
+            return
+
+        tienda = tienda_options[tienda_label]
+        uploaded_dni = upload_worker_file(foto_dni, doc_id)
+
+        worker_data = {
+            "dni": doc_id,
+            "id_tienda": tienda["id_tienda"],
+            "correo": normalize_email(correo),
+            "nombre": nombre.strip(),
+            "cargo": cargo.strip(),
+            "sueldo": float(sueldo) if sueldo is not None else None,
+            "telefono": telefono.strip(),
+            "csi": csi.strip(),
+            "foto_dni": uploaded_dni["secure_url"],
+            "estado": True,
+        }
+        create_document(WORKER_COLLECTION, doc_id, worker_data)
+        from supabase_backend import delete_rows, insert_document
+        delete_rows("horario_trabajador", [("dni_trabajador", "eq", doc_id)])
+        for day in selected_days:
+            schedule_item = horario.get(day, {})
+            insert_document("horario_trabajador", {
+                "dni_trabajador": doc_id,
+                "dia_semana": day,
+                "horario_entrada": schedule_item.get("hora_inicio") if schedule_item.get("hora_inicio") not in (None, "") else "00:00",
+                "horario_inicio_receso": schedule_item.get("inicio_receso") or None,
+                "horario_fin_receso": schedule_item.get("final_receso") or None,
+                "horario_salida": schedule_item.get("hora_final") if schedule_item.get("hora_final") not in (None, "") else "00:00",
+            })
+        st.session_state["worker_success_message"] = f"✓  Trabajador registrado → `{WORKER_COLLECTION}/{doc_id}`"
+        st.session_state["worker_form_seed"] = form_seed + 1
+        st.rerun()
+    except Exception as exc:
+        st.error(f"No se pudo registrar el trabajador: {exc}")
 
 
 def asistencia_form():

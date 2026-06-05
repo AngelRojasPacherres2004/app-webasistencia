@@ -1,10 +1,11 @@
 import base64
 import hmac
+import re
 from pathlib import Path
 
 import streamlit as st
 
-from supabase_backend import get_admin_login_diagnostics, list_admin_rows, verify_password
+from supabase_backend import list_admin_rows, verify_password
 
 SESSION_AUTH_KEY = "admin_authenticated"
 SESSION_USER_KEY = "admin_username"
@@ -32,30 +33,35 @@ def _get_admin_credentials_from_secrets():
     return None, None
 
 
+def _validate_login_input(username, password):
+    user = str(username or "").strip()
+    pwd = str(password or "")
+    if not user or not pwd:
+        return "Debes completar correo y contrasena."
+    return None
+
+
 def _check_credentials(input_user, input_pass):
     username = str(input_user or "").strip().lower()
     password = str(input_pass or "")
     if not username or not password:
         return False
 
-    try:
-        for admin_row in list_admin_rows():
-            correo = str((admin_row or {}).get("correo", "")).strip().lower()
-            if not correo:
-                continue
-            if not hmac.compare_digest(correo, username):
-                continue
-            stored_password = (
-                admin_row.get("contrasena")
-                or admin_row.get("password")
-                or admin_row.get("contraseña")
-                or admin_row.get("clave")
-                or ""
-            )
-            if verify_password(stored_password, password):
-                return True
-    except Exception:
-        return False
+    for admin_row in list_admin_rows():
+        correo = str((admin_row or {}).get("correo", "")).strip().lower()
+        if not correo:
+            continue
+        if not hmac.compare_digest(correo, username):
+            continue
+        stored_password = (
+            admin_row.get("contrasena")
+            or admin_row.get("password")
+            or admin_row.get("contraseña")
+            or admin_row.get("clave")
+            or ""
+        )
+        if verify_password(stored_password, password):
+            return True
 
     admin_user, admin_pass = _get_admin_credentials_from_secrets()
     if admin_user and admin_pass:
@@ -135,7 +141,7 @@ def render_login():
                 Login Administrador
             </div>
             <div style="font-size:0.81rem;color:#3f3f46;margin-top:0.2rem;">
-                Ingresa tu correo y contraseña.
+                Ingresa tu correo y contrasena.
             </div>
         </div>
         """,
@@ -146,24 +152,23 @@ def render_login():
     with center:
         with st.form("admin_login_form", clear_on_submit=False):
             username = st.text_input("Correo", placeholder="admin@empresa.com")
-            password = st.text_input("Contraseña", type="password", placeholder="********")
-            submit = st.form_submit_button("Iniciar sesión", use_container_width=True)
+            password = st.text_input("Contrasena", type="password", placeholder="********")
+            submit = st.form_submit_button("Iniciar sesion", use_container_width=True)
 
         if submit:
-            if _check_credentials(username, password):
-                st.session_state[SESSION_AUTH_KEY] = True
-                st.session_state[SESSION_USER_KEY] = username.strip()
-                st.success("Acceso correcto.")
-                st.rerun()
-            else:
-                st.error("Correo o contraseña incorrectos.")
-                with st.expander("Diagnóstico de PostgreSQL", expanded=True):
-                    diag = get_admin_login_diagnostics()
-                    st.write({
-                        "conectado": diag["connected"],
-                        "tabla": diag["table"],
-                        "filas_leidas": diag["row_count"],
-                        "correos_vistos": diag["sample_emails"],
-                    })
-                    if diag["error"]:
-                        st.error(diag["error"])
+            try:
+                input_error = _validate_login_input(username, password)
+                if input_error:
+                    st.error(input_error)
+                    return
+
+                if _check_credentials(username, password):
+                    st.session_state[SESSION_AUTH_KEY] = True
+                    st.session_state[SESSION_USER_KEY] = username.strip()
+                    st.success("Acceso correcto.")
+                    st.rerun()
+                    return
+
+                st.error("Correo o contrasena incorrectos.")
+            except Exception as exc:
+                st.error(f"Error al iniciar sesion: {exc}")

@@ -1,4 +1,5 @@
-from datetime import date
+﻿from datetime import date
+import re
 from uuid import uuid4
 
 import streamlit as st
@@ -11,7 +12,18 @@ def _badge_estado(estado: bool) -> str:
 
 
 def _store_label(store):
-    return f"{store.get('nombre_tienda', '')} · {store.get('id_tienda', '')}"
+    return f"{store.get('nombre_tienda', '')} Â· {store.get('id_tienda', '')}"
+
+
+def _validate_password(password):
+    text = str(password or "").strip()
+    if not text:
+        return None
+    if len(text) < 3:
+        return "La contrasena debe tener al menos 3 caracteres."
+    if not re.fullmatch(r"[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};:'\",.<>/?\\|`~]+", text):
+        return "La contrasena solo puede incluir letras, numeros y signos sin espacios."
+    return None
 
 
 def _render_store_form(api, store=None):
@@ -50,13 +62,13 @@ def _render_store_form(api, store=None):
             key=f"{form_kind}_store_correo_{form_seed}",
         )
         telefono = col_1.text_input(
-            "Teléfono",
+            "TelÃ©fono",
             value=store.get("telefono", "") if store else "",
             placeholder="+51 999 999 999",
             key=f"{form_kind}_store_telefono_{form_seed}",
         )
         direccion = col_2.text_input(
-            "Dirección",
+            "DirecciÃ³n",
             value=store.get("direccion", "") if store else "",
             placeholder="Av. Principal 123",
             key=f"{form_kind}_store_direccion_{form_seed}",
@@ -66,15 +78,16 @@ def _render_store_form(api, store=None):
             value=fecha_default,
             key=f"{form_kind}_store_fecha_{form_seed}",
         )
-        password = col_2.text_input(
-            "Contraseña" + (" *" if store is None else ""),
-            type="password",
-            placeholder="Dejar vacío para mantener" if store else "",
-            help="La contraseña se oculta con el icono del ojo.",
-            key=f"{form_kind}_store_password_{form_seed}",
-        )
+        password = ""
+        if store:
+            password = col_2.text_input(
+                "Contrasena",
+                value="",
+                placeholder="Dejar vacio para mantener la actual",
+                key=f"{form_kind}_store_password_{form_seed}",
+            )
         submitted = st.form_submit_button(
-            "Guardar cambios" if store else "⬡  Registrar tienda",
+            "Guardar cambios" if store else "â¬¡  Registrar tienda",
             use_container_width=True,
         )
 
@@ -92,7 +105,7 @@ def _render_store_form(api, store=None):
 
 
 def render_tiendas(api):
-    api.section_header("Tiendas", "CRUD completo para sedes y accesos")
+    api.section_header("Tiendas")
     tiendas = api.get_tiendas()
 
     success_message = st.session_state.pop("store_success_message", None)
@@ -108,7 +121,7 @@ def render_tiendas(api):
     col_busq, col_btn = st.columns([3, 1])
     with col_busq:
         busqueda = st.text_input(
-            "🔍 Buscar por nombre, correo o dirección",
+            "ðŸ” Buscar por nombre, correo o direcciÃ³n",
             placeholder="Escribe para filtrar...",
             label_visibility="collapsed",
         )
@@ -121,7 +134,7 @@ def render_tiendas(api):
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     if not tiendas:
-        st.warning("Todavía no hay tiendas registradas.")
+        st.warning("TodavÃ­a no hay tiendas registradas.")
         if mode == "create":
             st.markdown("---")
             form = _render_store_form(api, store=None)
@@ -148,8 +161,8 @@ def render_tiendas(api):
             unsafe_allow_html=True,
         )
 
-        headers = ["TIENDA", "CORREO", "CONTRASEÑA", "DIRECCIÓN", "ESTADO", "", ""]
-        cols_head = st.columns([2.5, 1.8, 1.6, 1.8, 1.0, 0.6, 0.6])
+        headers = ["TIENDA", "CORREO", "DIRECCION", "ESTADO", "", ""]
+        cols_head = st.columns([2.5, 1.8, 1.8, 1.0, 0.6, 0.6])
         for col, header in zip(cols_head, headers):
             col.markdown(f"<span class='table-header'>{header}</span>", unsafe_allow_html=True)
 
@@ -159,27 +172,25 @@ def render_tiendas(api):
             if i > 0:
                 st.markdown("<hr style='margin:0.5rem 0; border-color:#f1f5f9; opacity:0.6;'>", unsafe_allow_html=True)
 
-            col1, col2, col3, col4, col5, col6, col7 = st.columns([2.5, 1.8, 1.6, 1.8, 1.0, 0.6, 0.6])
+            col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1.8, 1.8, 1.0, 0.6, 0.6])
 
             with col1:
                 st.markdown(
                     f"""
                     <div>
-                        <div class="row-main">{store.get('nombre_tienda', '—')}</div>
-                        <div class="row-sub">{store.get('telefono', '') or 'Sin teléfono'}</div>
+                        <div class="row-main">{store.get('nombre_tienda', 'â€”')}</div>
+                        <div class="row-sub">{store.get('telefono', '') or 'Sin telÃ©fono'}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
             with col2:
-                st.caption(str(store.get("correo", "—")))
+                st.caption(str(store.get("correo", "â€”")))
             with col3:
-                st.caption(str(store.get("contrasena", "—")))
+                st.caption(str(store.get("direccion", "â€”")))
             with col4:
-                st.caption(str(store.get("direccion", "—")))
-            with col5:
                 st.markdown(_badge_estado(store.get("estado", True)), unsafe_allow_html=True)
-            with col6:
+            with col5:
                 estado_actual = bool(store.get("estado", True))
                 emoji = "🟢" if estado_actual else "🔴"
                 nuevo_estado = not estado_actual
@@ -192,11 +203,11 @@ def render_tiendas(api):
                             key_field="id_tienda",
                         )
                         st.cache_data.clear()
-                        st.session_state["store_success_message"] = "✅ Estado actualizado."
+                        st.session_state["store_success_message"] = "âœ… Estado actualizado."
                     except Exception as exc:
                         st.session_state["store_success_message"] = f"Error: {exc}"
                     st.rerun()
-            with col7:
+            with col6:
                 if st.button("🖍", key=f"edit_store_{store['id_tienda']}", help="Editar tienda", use_container_width=True):
                     st.session_state["store_form_mode"] = "edit"
                     st.session_state["store_id_editar"] = store["id_tienda"]
@@ -210,7 +221,7 @@ def render_tiendas(api):
             if form["submitted"]:
                 _handle_store_update(api, store_to_edit, form)
 
-            if st.button("✖ Cancelar edición", key="btn_cancel_edit_store"):
+            if st.button("âœ– Cancelar ediciÃ³n", key="btn_cancel_edit_store"):
                 st.session_state["store_form_mode"] = "list"
                 st.session_state["store_id_editar"] = None
                 st.rerun()
@@ -223,61 +234,72 @@ def render_tiendas(api):
 
 
 def _handle_store_create(api, form):
-    missing = api.required_missing({
-        "Nombre tienda": form["nombre_tienda"],
-        "Correo": form["correo"],
-        "Contraseña": form["password"],
-    })
-    if missing:
-        st.error("Campos requeridos: " + ", ".join(missing))
-        return
+    try:
+        missing = api.required_missing({
+            "Nombre tienda": form["nombre_tienda"],
+            "Correo": form["correo"],
+        })
+        if missing:
+            st.error("Campos requeridos: " + ", ".join(missing))
+            return
 
-    store_id = str(uuid4())
-    if api.document_exists(api.STORE_COLLECTION, store_id):
-        st.error(f"Ya existe una tienda con el ID `{store_id}`.")
-        return
+        store_id = str(uuid4())
+        if api.document_exists(api.STORE_COLLECTION, store_id):
+            st.error(f"Ya existe una tienda con el ID `{store_id}`.")
+            return
 
-    store_data = {
-        "correo": api.normalize_email(form["correo"]),
-        "contrasena": str(form["password"] or ""),
-        "nombre": form["nombre_tienda"].strip(),
-        "telefono": form["telefono"].strip(),
-        "direccion": form["direccion"].strip(),
-        "fecha_apertura": form["fecha_apertura"].isoformat() if form["fecha_apertura"] else None,
-        "estado": True,
-    }
-    api.create_store_with_qr(store_id, store_data)
-    st.cache_data.clear()
-    st.session_state["store_success_message"] = f"✓  Tienda registrada → `{api.STORE_COLLECTION}/{store_id}`"
-    st.session_state["store_form_seed"] = form["form_seed"] + 1
-    st.session_state["store_form_mode"] = "list"
-    st.rerun()
+        store_data = {
+            "correo": api.normalize_email(form["correo"]),
+            "nombre": form["nombre_tienda"].strip(),
+            "telefono": form["telefono"].strip(),
+            "direccion": form["direccion"].strip(),
+            "fecha_apertura": form["fecha_apertura"].isoformat() if form["fecha_apertura"] else None,
+            "estado": True,
+        }
+        api.create_store_with_qr(store_id, store_data)
+        st.cache_data.clear()
+        st.session_state["store_success_message"] = f"âœ“  Tienda registrada â†’ `{api.STORE_COLLECTION}/{store_id}`"
+        st.session_state["store_form_seed"] = form["form_seed"] + 1
+        st.session_state["store_form_mode"] = "list"
+        st.rerun()
+    except Exception as exc:
+        st.error(f"No se pudo registrar la tienda: {exc}")
 
 
 def _handle_store_update(api, store, form):
-    missing = api.required_missing({
-        "Nombre tienda": form["nombre_tienda"],
-        "Correo": form["correo"],
-    })
-    if missing:
-        st.error("Campos requeridos: " + ", ".join(missing))
-        return
+    try:
+        missing = api.required_missing({
+            "Nombre tienda": form["nombre_tienda"],
+            "Correo": form["correo"],
+        })
+        if missing:
+            st.error("Campos requeridos: " + ", ".join(missing))
+            return
 
-    store_data = {
-        "correo": api.normalize_email(form["correo"]),
-        "nombre": form["nombre_tienda"].strip(),
-        "telefono": form["telefono"].strip(),
-        "direccion": form["direccion"].strip(),
-        "fecha_apertura": form["fecha_apertura"].isoformat() if form["fecha_apertura"] else None,
-        "estado": True if store.get("estado", True) else False,
-    }
-    if form["password"].strip():
-        store_data["contrasena"] = str(form["password"])
+        password_error = _validate_password(form.get("password", ""))
+        if password_error:
+            st.error(password_error)
+            return
 
-    api.update_document(api.STORE_COLLECTION, store["id_tienda"], store_data, key_field="id_tienda")
-    st.cache_data.clear()
-    st.session_state["store_success_message"] = f"✓  Tienda guardada → `{store['id_tienda']}`"
-    st.session_state["store_form_seed"] = form["form_seed"] + 1
-    st.session_state["store_form_mode"] = "list"
-    st.session_state["store_id_editar"] = None
-    st.rerun()
+        store_data = {
+            "correo": api.normalize_email(form["correo"]),
+            "nombre": form["nombre_tienda"].strip(),
+            "telefono": form["telefono"].strip(),
+            "direccion": form["direccion"].strip(),
+            "fecha_apertura": form["fecha_apertura"].isoformat() if form["fecha_apertura"] else None,
+            "estado": True if store.get("estado", True) else False,
+        }
+        if str(form.get("password", "")).strip():
+            store_data["contrasena"] = str(form["password"]).strip()
+
+        api.update_document(api.STORE_COLLECTION, store["id_tienda"], store_data, key_field="id_tienda")
+        st.cache_data.clear()
+        st.session_state["store_success_message"] = f"âœ“  Tienda guardada â†’ `{store['id_tienda']}`"
+        st.session_state["store_form_seed"] = form["form_seed"] + 1
+        st.session_state["store_form_mode"] = "list"
+        st.session_state["store_id_editar"] = None
+        st.rerun()
+    except Exception as exc:
+        st.error(f"No se pudo guardar la tienda: {exc}")
+
+

@@ -18,6 +18,17 @@ def _badge_cargo(cargo: str) -> str:
     return f'<span class="badge badge--blue">{cargo.upper()}</span>'
 
 
+def _validate_password(password):
+    text = str(password or "").strip()
+    if not text:
+        return None
+    if len(text) < 3:
+        return "La contrasena debe tener al menos 3 caracteres."
+    if not re.fullmatch(r"[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};:'\",.<>/?\\|`~]+", text):
+        return "La contrasena solo puede incluir letras, numeros y signos sin espacios."
+    return None
+
+
 def _worker_label(worker):
     return f"{worker.get('nombre_trabajador', '')} - {worker.get('dni', '')}"
 
@@ -445,7 +456,6 @@ def _render_worker_form(api, worker=None):
         st.warning("Selecciona al menos un dia para el horario.")
 
     initial_schedule = _build_initial_schedule(api.get_horarios_trabajador(), worker.get("dni")) if worker else None
-    existing_password = worker.get("contrasena", "") if worker else ""
     existing_photo = worker.get("foto_dni", "") if worker else ""
     estado_actual = bool(worker.get("estado", True)) if worker else True
 
@@ -461,7 +471,6 @@ def _render_worker_form(api, worker=None):
 
     with st.form(f"worker_form_{form_kind}_{form_seed}", clear_on_submit=False):
         col_1, col_2 = st.columns(2)
-
         dni = col_1.text_input(
             "DNI *",
             value=worker.get("dni", "") if worker else "",
@@ -495,12 +504,14 @@ def _render_worker_form(api, worker=None):
             placeholder="juan@empresa.com",
             key=f"{form_kind}_correo_{form_seed}",
         )
-        password = col_2.text_input(
-            "Contrasena",
-            type="password",
-            placeholder="Dejar vacio para mantener",
-            key=f"{form_kind}_password_{form_seed}",
-        )
+        password = ""
+        if worker:
+            password = col_2.text_input(
+                "Contrasena",
+                value="",
+                placeholder="Dejar vacio para mantener la actual",
+                key=f"{form_kind}_password_{form_seed}",
+            )
         telefono = col_2.text_input(
             "Telefono",
             value=worker.get("telefono", "") if worker else "",
@@ -544,54 +555,56 @@ def _render_worker_form(api, worker=None):
     if not submitted:
         return None
 
-    missing = api.required_missing({"DNI": dni, "Nombre": nombre, "Tienda": tienda_label})
-    if worker is None and not foto_dni:
-        missing.append("Foto DNI")
-    if not selected_days:
-        missing.append("Dias laborables")
+    try:
+        missing = api.required_missing({"DNI": dni, "Nombre": nombre, "Tienda": tienda_label})
+        if worker is None and not foto_dni:
+            missing.append("Foto DNI")
+        if not selected_days:
+            missing.append("Dias laborables")
 
-    if missing:
-        st.error("Campos requeridos: " + ", ".join(missing))
-        return None
+        if missing:
+            st.error("Campos requeridos: " + ", ".join(missing))
+            return None
 
-    doc_id = str(dni).strip()
-    tienda = tienda_options[tienda_label]
-    photo_url = existing_photo
-    if foto_dni:
-        try:
+        password_error = _validate_password(password)
+        if password_error:
+            st.error(password_error)
+            return None
+
+        doc_id = str(dni).strip()
+        tienda = tienda_options[tienda_label]
+        photo_url = existing_photo
+        if foto_dni:
             uploaded_dni = api.upload_worker_file(foto_dni, doc_id)
             photo_url = uploaded_dni["secure_url"]
-        except Exception as exc:
-            st.error(f"No se pudo subir el archivo a Cloudinary: {exc}")
+        elif not photo_url and worker is None:
+            st.error("Debes subir la foto del DNI.")
             return None
-    elif not photo_url and worker is None:
-        st.error("Debes subir la foto del DNI.")
-        return None
 
-    password_value = password.strip() if password else ""
-    stored_password = worker.get("contrasena", "") if worker else ""
+        worker_data = {
+            "dni": doc_id,
+            "id_tienda": tienda["id_tienda"],
+            "correo": api.normalize_email(correo),
+            "nombre": nombre.strip(),
+            "cargo": cargo.strip(),
+            "sueldo": float(sueldo) if sueldo is not None else None,
+            "telefono": telefono.strip(),
+            "csi": csi.strip(),
+            "foto_dni": photo_url,
+            "estado": bool(estado),
+        }
+        if str(password or "").strip():
+            worker_data["contrasena"] = str(password).strip()
 
-    worker_data = {
-        "dni": doc_id,
-        "id_tienda": tienda["id_tienda"],
-        "correo": api.normalize_email(correo),
-        "contrasena": password_value if password_value else stored_password,
-        "nombre": nombre.strip(),
-        "cargo": cargo.strip(),
-        "sueldo": float(sueldo) if sueldo is not None else None,
-        "telefono": telefono.strip(),
-        "csi": csi.strip(),
-        "foto_dni": photo_url,
-        "estado": bool(estado),
-    }
-
-    api.create_document(api.WORKER_COLLECTION, doc_id, worker_data)
-    api.save_worker_schedule(worker_data, selected_days, horario)
-    st.session_state["worker_success_message"] = f"Trabajador guardado -> `{api.WORKER_COLLECTION}/{doc_id}`"
-    st.cache_data.clear()
-    st.session_state[f"worker_{form_kind}_seed"] = form_seed + 1
-    st.session_state["worker_form_mode"] = "list"
-    st.rerun()
+        api.create_document(api.WORKER_COLLECTION, doc_id, worker_data)
+        api.save_worker_schedule(worker_data, selected_days, horario)
+        st.session_state["worker_success_message"] = f"Trabajador guardado -> `{api.WORKER_COLLECTION}/{doc_id}`"
+        st.cache_data.clear()
+        st.session_state[f"worker_{form_kind}_seed"] = form_seed + 1
+        st.session_state["worker_form_mode"] = "list"
+        st.rerun()
+    except Exception as exc:
+        st.error(f"No se pudo guardar el trabajador: {exc}")
 
 
 def render_trabajadores(api):
@@ -692,8 +705,8 @@ def render_trabajadores(api):
         st.markdown("<div style='margin-bottom:15px;'><span class='section-header__title'>Lista de trabajadores</span></div>", unsafe_allow_html=True)
         
         # Cabecera de la tabla dentro del contenedor para mantener alineación responsiva
-        headers = ["TRABAJADOR", "CORREO", "CONTRASEÑA", "CARGO", "ESTADO", "", ""]
-        col_h = st.columns([2.6, 1.7, 1.7, 1.2, 1, 0.6, 0.6])
+        headers = ["TRABAJADOR", "CORREO", "CARGO", "ESTADO", "", ""]
+        col_h = st.columns([2.6, 1.7, 1.2, 1, 0.6, 0.6])
         for col, header in zip(col_h, headers):
             col.markdown(f"<span class='table-header'>{header}</span>", unsafe_allow_html=True)
             
@@ -703,7 +716,7 @@ def render_trabajadores(api):
             if i > 0:
                 st.markdown("<hr style='margin:0.5rem 0; border-color:#f1f5f9; opacity:0.6;'>", unsafe_allow_html=True)
             
-            col1, col2, col3, col4, col5, col6, col7 = st.columns([2.6, 1.7, 1.7, 1.2, 1, 0.6, 0.6])
+            col1, col2, col3, col4, col5, col6 = st.columns([2.6, 1.7, 1.2, 1, 0.6, 0.6])
 
             with col1:
                 nombre = worker.get("nombre_trabajador", "-")
@@ -720,15 +733,12 @@ def render_trabajadores(api):
                 st.caption(str(worker.get("correo", "-")))
             
             with col3:
-                st.caption(str(worker.get("contrasena", "-")))
-            
-            with col4:
                 st.markdown(_badge_cargo(worker.get("area", worker.get("cargo", ""))), unsafe_allow_html=True)
-            
-            with col5:
+
+            with col4:
                 st.markdown(_badge_estado(worker.get("estado", True)), unsafe_allow_html=True)
 
-            with col6:
+            with col5:
                 estado_actual = bool(worker.get("estado", True))
                 emoji = "🟢" if estado_actual else "🔴"
                 nuevo_estado = not estado_actual
@@ -746,7 +756,7 @@ def render_trabajadores(api):
                         st.session_state["worker_success_message"] = f"Error: {exc}"
                     st.rerun()
 
-            with col7:
+            with col6:
                 if st.button("🖍", key=f"edit_worker_{worker['dni']}", help="Editar", use_container_width=True):
                     st.session_state["worker_form_mode"] = "editar"
                     st.session_state["worker_id_editar"] = worker["dni"]
