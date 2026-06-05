@@ -81,79 +81,136 @@ def render_login():
     st.markdown(
         f"""
         <style>
-        html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stAppViewContainer"] > .main {{
+        /* Reset de fondos de Streamlit para ver el video */
+        [data-testid="stAppViewContainer"], [data-testid="stHeader"], .main .block-container {{
             background: transparent !important;
         }}
-        [data-testid="stHeader"] {{
-            background: transparent !important;
-        }}
-        .main .block-container {{
-            position: relative;
-            z-index: 20;
-        }}
+        
+        /* Contenedor del Video de fondo */
         .login-video-wrap {{
             position: fixed;
             inset: 0;
-            z-index: -20;
+            z-index: -2;
             overflow: hidden;
-            pointer-events: none;
         }}
+        
         .login-video-wrap video {{
             width: 100%;
             height: 100%;
             object-fit: cover;
-            filter: saturate(0.95) contrast(0.95);
         }}
-        .login-video-overlay {{
+
+        /* Capa de filtro (Ligero filtro oscuro de antes) */
+        .login-overlay {{
+            content: "";
             position: fixed;
             inset: 0;
-            z-index: -10;
-            background: rgba(0, 0, 0, 0.34);
-            pointer-events: none;
+            background: rgba(0, 0, 0, 0.34) !important;
+            z-index: -1;
         }}
-        .login-head {{
-            max-width: 460px;
-            margin: 3.2rem auto 1rem;
-            padding: 1.05rem 1.1rem;
-            border: 1px solid #d4d4d8;
-            border-radius: 14px;
-            background: #ffffff;
-            box-shadow: 0 12px 28px rgba(15,23,42,0.10);
+
+        .main .block-container {{
+            position: relative;
+            z-index: 10;
+            padding-top: 10vh !important;
         }}
+
+        /* Tarjeta de Login (Glassmorphism) */
         [data-testid="stForm"] {{
-            background: #ffffff !important;
-            opacity: 1 !important;
-            border: 1px solid #d4d4d8 !important;
-            box-shadow: 0 14px 30px rgba(15,23,42,0.20) !important;
+            background: rgba(255, 255, 255, 0.05) !important;
+            backdrop-filter: blur(20px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-radius: 28px !important;
+            padding: 3rem 2.5rem !important;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
         }}
-        [data-testid="stForm"] * {{
-            opacity: 1 !important;
+
+        .login-logo {{
+            text-align: center;
+            margin-bottom: 2rem;
+        }}
+
+        .login-logo h1 {{
+            font-family: 'Space Mono', monospace !important;
+            font-size: 2.2rem !important;
+            font-weight: 700 !important;
+            color: #ffffff !important;
+            letter-spacing: -0.05em !important;
+            margin: 0 !important;
+            border: none !important;
+            padding: 0 !important;
+        }}
+
+        .login-logo p {{
+            font-family: 'DM Sans', sans-serif !important;
+            font-size: 0.9rem !important;
+            color: #94a3b8 !important;
+            margin-top: 0.5rem !important;
+        }}
+
+        /* Inputs con estilo moderno */
+        [data-testid="stTextInput"] label {{
+            color: #cbd5e1 !important;
+            font-family: 'Space Mono', monospace !important;
+            font-size: 0.75rem !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.1em !important;
+            margin-bottom: 0.5rem !important;
+        }}
+
+        [data-testid="stTextInput"] input {{
+            background: rgba(255, 255, 255, 0.05) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            color: #ffffff !important;
+            border-radius: 12px !important;
+            padding: 0.75rem 1rem !important;
+        }}
+
+        /* Botón de entrada */
+        .stButton button {{
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+            color: white !important;
+            font-family: 'Space Mono', monospace !important;
+            font-weight: 700 !important;
+            border-radius: 12px !important;
+            padding: 0.75rem !important;
+            margin-top: 1.5rem !important;
+            border: none !important;
+            box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3) !important;
+            transition: all 0.3s ease !important;
+        }}
+
+        .stButton button:hover {{
+            transform: translateY(-2px) !important;
+            box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.4) !important;
         }}
         </style>
+
         <div class="login-video-wrap">
             <video autoplay muted loop playsinline>
                 <source src="data:video/mp4;base64,{login_video_b64}" type="video/mp4">
             </video>
         </div>
-        <div class="login-video-overlay"></div>
-        <div class="login-head">
-            <div style="font-family:'Space Mono',monospace;font-size:1.05rem;color:#0b0b0b;letter-spacing:0.03em;">
-                Login Administrador
-            </div>
-            <div style="font-size:0.81rem;color:#3f3f46;margin-top:0.2rem;">
-                Ingresa tu correo y contrasena.
-            </div>
-        </div>
+        <div class="login-overlay"></div>
         """,
         unsafe_allow_html=True,
     )
 
-    _, center, _ = st.columns([1.25, 2.5, 1.25])
+    _, center, _ = st.columns([1, 1.5, 1])
     with center:
         with st.form("admin_login_form", clear_on_submit=False):
-            username = st.text_input("Correo", placeholder="admin@empresa.com")
-            password = st.text_input("Contrasena", type="password", placeholder="********")
-            submit = st.form_submit_button("Iniciar sesion", use_container_width=True)
+            st.markdown(
+                """
+                <div class="login-logo">
+                    <h1>⬡ ADMIN</h1>
+                    <p>Gestión de Asistencia y Personal</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            username = st.text_input("Usuario / Correo", placeholder="admin@empresa.com")
+            password = st.text_input("Contraseña", type="password", placeholder="••••••••")
+            submit = st.form_submit_button("Entrar al Panel", use_container_width=True)
 
         if submit:
             try:

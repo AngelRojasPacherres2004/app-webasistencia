@@ -819,14 +819,14 @@ def overview():
     tab_t, tab_w, tab_a = st.tabs(["Tiendas", "Trabajadores", "Asistencias"])
 
     with tab_t:
-        st.caption(f"tabla PostgreSQL: `{STORE_COLLECTION}`")
+        st.caption(f"Tabla: `{STORE_COLLECTION}`")
         if tiendas:
             st.dataframe(tiendas, use_container_width=True, hide_index=True)
         else:
             st.info("Todavía no hay tiendas registradas.")
 
     with tab_w:
-        st.caption(f"tabla PostgreSQL: `{WORKER_COLLECTION}`")
+        st.caption(f"Tabla: `{WORKER_COLLECTION}`")
         if trabajadores:
             st.dataframe(trabajadores, use_container_width=True, hide_index=True)
             worker_options = {
@@ -848,7 +848,7 @@ def overview():
             st.info("Todavía no hay trabajadores registrados.")
 
     with tab_a:
-        st.caption(f"tabla PostgreSQL: `{ATTENDANCE_COLLECTION}`  ·  últimos 30 registros")
+        st.caption(f"Tabla: `{ATTENDANCE_COLLECTION}`  ·  últimos 30 registros")
         if asistencias:
             st.dataframe(asistencias, use_container_width=True, hide_index=True)
         else:
@@ -960,7 +960,7 @@ def admin_page():
                     </div>
                     <div style="font-size:0.79rem; color:var(--text); font-family:'DM Sans',sans-serif;
                                 margin-top:0.24rem;">
-                        Sistema de Asistencia · PostgreSQL
+                        Sistema de Asistencia
                     </div>
                 </div>
             </div>
@@ -978,7 +978,7 @@ def admin_page():
         connection = get_connection()
         connection.close()
     except Exception as exc:
-        st.error(f"No se pudo conectar con PostgreSQL: {exc}")
+        st.error(f"No se pudo conectar con la base de datos: {exc}")
         st.stop()
 
     pages[current_page](build_section_context())
