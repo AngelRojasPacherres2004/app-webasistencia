@@ -149,8 +149,8 @@ def render_login():
         }}
 
         /* Inputs con estilo moderno */
-        [data-testid="stTextInput"] label {{
-            color: #cbd5e1 !important;
+        [data-testid="stTextInput"] label p {{
+            color: #ffffff !important;
             font-family: 'Space Mono', monospace !important;
             font-size: 0.75rem !important;
             text-transform: uppercase !important;
