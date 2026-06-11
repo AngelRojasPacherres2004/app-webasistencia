@@ -504,14 +504,6 @@ def _render_worker_form(api, worker=None):
             placeholder="juan@empresa.com",
             key=f"{form_kind}_correo_{form_seed}",
         )
-        password = ""
-        if worker:
-            password = col_2.text_input(
-                "Contrasena",
-                value="",
-                placeholder="Dejar vacio para mantener la actual",
-                key=f"{form_kind}_password_{form_seed}",
-            )
         password_label = "Contrasena *" if not worker else "Contrasena"
         password_placeholder = "Ingresa una contrasena" if not worker else "Dejar vacio para mantener la actual"
         password = col_2.text_input(
