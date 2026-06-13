@@ -25,6 +25,7 @@ from sections.salarios import render_salarios
 from sections.tiendas import render_tiendas
 from sections.trabajadores import render_trabajadores
 from sections.correo_resend import render_correo
+from sections.asistencias_multiples import render_asistencias_multiples
 from supabase_backend import (
     create_store_with_qr as backend_create_store_with_qr,
     document_exists as backend_document_exists,
@@ -896,6 +897,7 @@ def admin_page():
         "Correo": render_correo,
         "Tiendas": render_tiendas,
         "Trabajadores": render_trabajadores,
+        "Marcas": render_asistencias_multiples,
     }
 
     st.markdown('<div class="admin-content-wrapper"></div>', unsafe_allow_html=True)
