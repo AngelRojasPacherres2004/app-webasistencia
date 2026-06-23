@@ -1,0 +1,13 @@
+[build]
+  # Comando para instalar dependencias.
+  command = "pip install -r requirements.txt"
+  # Directorio donde Netlify busca las funciones serverless.
+  functions = "netlify/functions"
+  # Netlify no necesita un directorio de publicación estático en este caso.
+  publish = "."
+
+[[redirects]]
+  # Redirige todas las peticiones a nuestra función serverless.
+  from = "/*"
+  to = "/.netlify/functions/app"
+  status = 200
