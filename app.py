@@ -8,9 +8,8 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 def run_streamlit():
     """Ejecuta streamlit en un subproceso."""
-    # Usamos la ruta del archivo principal de tu app
-    # Asumiendo que está en el mismo directorio
-    path_to_app = os.path.join(os.path.dirname(__file__), '..', '..', 'app.py')
+    # La ruta correcta al archivo principal de tu app, que ahora está en la raíz.
+    path_to_app = os.path.join(os.path.dirname(__file__), '..', '..', 'main_app.py')
     command = ["streamlit", "run", path_to_app, "--server.port", "8501", "--server.headless", "true"]
     subprocess.run(command)
 
@@ -21,7 +20,7 @@ def handler(event, context):
     thread.start()
     
     # La función debe devolver una respuesta HTTP.
-    # Aquí simplemente devolvemos un mensaje, ya que proxying a Streamlit es muy complejo.
+    # Aquí simplemente devolvemos un mensaje, ya que el proxying a Streamlit es muy complejo.
     return {
         'statusCode': 200,
         'headers': {'Content-Type': 'text/html'},
