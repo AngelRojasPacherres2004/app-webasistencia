@@ -187,6 +187,36 @@ def _filter_context(asistencias, trabajadores, selected_store_label, store_optio
     return filtered_workers, filtered_asistencias
 
 
+def _filter_context_with_worker(
+    asistencias,
+    trabajadores,
+    selected_store_label,
+    store_options,
+    search_query,
+    selected_worker_dni=None,
+):
+    filtered_workers, filtered_asistencias = _filter_context(
+        asistencias,
+        trabajadores,
+        selected_store_label,
+        store_options,
+        search_query,
+    )
+
+    worker_dni = str(selected_worker_dni or "").strip()
+    if worker_dni:
+        filtered_workers = [
+            w for w in filtered_workers
+            if str(w.get("dni", "")).strip() == worker_dni
+        ]
+        filtered_asistencias = [
+            r for r in filtered_asistencias
+            if str(r.get("dni", "")).strip() == worker_dni
+        ]
+
+    return filtered_workers, filtered_asistencias
+
+
 def _period_bounds(period_type, reference_date):
     reference_date = reference_date or date.today()
     if period_type == "Mes":
@@ -229,6 +259,147 @@ def _collect_period_rows(asistencias, workers, start_date, end_date, schedule_ma
 
     _apply_late_flag(rows, schedule_map)
     return sorted(rows, key=lambda r: (r.get("fecha", ""), r.get("nombre_trabajador", "")))
+
+
+def _build_attendance_excel(period_label, selected_store_label, search_query,
+                            selected_worker_label, workers, rows, start_date, end_date):
+    try:
+        import openpyxl
+        from openpyxl.styles import Alignment, Font, PatternFill
+        from io import BytesIO
+    except ImportError:
+        return None
+
+    def fmt_time(val):
+        if not val or str(val).strip() in ("", "None", "--"):
+            return ""
+        text = str(val).strip()
+        if "T" in text:
+            text = text.split("T", 1)[-1]
+        if " " in text:
+            text = text.split(" ", 1)[-1]
+        return text[:5]
+
+    def parse_minutes(val):
+        text = fmt_time(val)
+        if not text:
+            return None
+        try:
+            parsed = datetime.strptime(text[:5], "%H:%M").time()
+            return parsed.hour * 60 + parsed.minute
+        except ValueError:
+            return None
+
+    def calc_hours(row):
+        entry_minutes = parse_minutes(row.get("hora_inicio"))
+        exit_minutes = parse_minutes(row.get("hora_final"))
+        if entry_minutes is None or exit_minutes is None:
+            return "", ""
+
+        exit_floor_minutes = (exit_minutes // 60) * 60
+        total_minutes = exit_floor_minutes - entry_minutes
+
+        has_break = bool(fmt_time(row.get("inicio_receso")) and fmt_time(row.get("final_receso")))
+        if has_break:
+            total_minutes -= 60
+
+        total_minutes = max(total_minutes, 0)
+        hours = total_minutes // 60
+        minutes = total_minutes % 60
+        entry_text = fmt_time(row.get("hora_inicio")) or "-"
+        exit_text = fmt_time(row.get("hora_final")) or "-"
+        exit_floor_text = f"{exit_floor_minutes // 60:02d}:00"
+        calc_text = f"{exit_floor_text} - {entry_text}"
+        if has_break:
+            calc_text += " - 1:00 receso"
+        calc_text += f" = {hours}:{minutes:02d}"
+        return f"{hours}:{minutes:02d}", calc_text
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Resumen"
+
+    title_fill = PatternFill("solid", fgColor="1e3a5f")
+    title_font = Font(color="FFFFFF", bold=True)
+    header_fill = PatternFill("solid", fgColor="dbeafe")
+    header_font = Font(color="1e3a5f", bold=True)
+
+    ws["A1"] = "Reporte de Asistencias"
+    ws["A1"].fill = title_fill
+    ws["A1"].font = title_font
+    ws["A1"].alignment = Alignment(horizontal="center")
+
+    metadata = [
+        ("Periodo", period_label),
+        ("Rango", f"{start_date.strftime('%d/%m/%Y')} - {end_date.strftime('%d/%m/%Y')}"),
+        ("Tienda", selected_store_label if selected_store_label != "Todas" else "Todas las tiendas"),
+        ("Persona", selected_worker_label if selected_worker_label != "Todas" else "Todas"),
+        ("Busqueda", search_query or "-"),
+        ("Generado", datetime.now().strftime("%d/%m/%Y %H:%M")),
+    ]
+
+    row_idx = 3
+    for label, value in metadata:
+        ws.cell(row=row_idx, column=1, value=label)
+        ws.cell(row=row_idx, column=2, value=value)
+        ws.cell(row=row_idx, column=1).font = Font(bold=True)
+        row_idx += 1
+
+    row_idx += 1
+    headers = [
+        "#",
+        "Trabajador",
+        "DNI",
+        "Sede",
+        "Fecha",
+        "Entrada",
+        "Ini. receso",
+        "Fin receso",
+        "Salida",
+        "Horas",
+        "Cálculo horas",
+        "Tardanza",
+        "Justificado",
+    ]
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=row_idx, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    data_start = row_idx + 1
+    for i, row in enumerate(rows, 1):
+        horas, calculo = calc_hours(row)
+        ws.append(
+            [
+                i,
+                row.get("nombre_trabajador") or "-",
+                row.get("dni") or "-",
+                row.get("nombre_sede") or "-",
+                row.get("fecha") or "-",
+                fmt_time(row.get("hora_inicio")),
+                fmt_time(row.get("inicio_receso")),
+                fmt_time(row.get("final_receso")),
+                fmt_time(row.get("hora_final")),
+                horas,
+                calculo,
+                "Sí" if row.get("late") else "No",
+                "Sí" if _as_bool(row.get("justificado")) else "No",
+            ]
+        )
+
+    if ws.max_row >= data_start:
+        ws.freeze_panes = f"A{data_start}"
+        ws.auto_filter.ref = f"A{row_idx}:{ws.cell(row=ws.max_row, column=ws.max_column).coordinate}"
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 
 # ================================================================
@@ -727,7 +898,7 @@ def render_resumen(api=None):
     week_days = [current_start + timedelta(days=i) for i in range(6)]
 
     # Filtros y navegación semanal
-    sc1, sc2, sc3, sc4 = st.columns([2.4, 1.3, 0.75, 0.75])
+    sc1, sc2, sc3, sc4, sc5 = st.columns([2.2, 1.3, 1.8, 0.75, 0.75])
     search_query = sc1.text_input(
         "Buscar", placeholder="Nombre, DNI o sede...",
         key="resumen_search", label_visibility="collapsed",
@@ -736,18 +907,32 @@ def render_resumen(api=None):
         "Tienda", options=list(store_options.keys()),
         index=0, key="resumen_store_filter", label_visibility="collapsed",
     )
-    if sc3.button("⬅", use_container_width=True, key="resumen_prev_button", help="Semana anterior"):
+    worker_options = ["Todas"] + [
+        f"{w.get('nombre_trabajador', w.get('nombre', '-'))} · {w.get('dni', '-')}"
+        for w in trabajadores
+    ]
+    worker_labels = {opt: (None if opt == "Todas" else opt.split(" · ", 1)[-1]) for opt in worker_options}
+    selected_worker_label = sc3.selectbox(
+        "Persona", options=worker_options,
+        index=0, key="resumen_worker_filter", label_visibility="collapsed",
+    )
+    if sc4.button("⬅", use_container_width=True, key="resumen_prev_button", help="Semana anterior"):
         st.session_state["resumen_week"] = current_start - timedelta(days=7)
         st.rerun()
-    if sc4.button("➡", use_container_width=True, key="resumen_next_button", help="Semana siguiente"):
+    if sc5.button("➡", use_container_width=True, key="resumen_next_button", help="Semana siguiente"):
         st.session_state["resumen_week"] = current_start + timedelta(days=7)
         st.rerun()
 
     schedule_map = _build_schedule_map(horarios)
     _apply_late_flag(asistencias, schedule_map)
 
-    filtered_workers, filtered_asistencias = _filter_context(
-        asistencias, trabajadores, selected_store_label, store_options, search_query,
+    filtered_workers, filtered_asistencias = _filter_context_with_worker(
+        asistencias,
+        trabajadores,
+        selected_store_label,
+        store_options,
+        search_query,
+        worker_labels.get(selected_worker_label),
     )
 
     # Tarjeta de rango de fechas
@@ -829,7 +1014,7 @@ def render_resumen(api=None):
 
     # Exportar PDF
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    ex1, ex2, ex3 = st.columns([1.1, 1.1, 1.3])
+    ex1, ex2, ex3, ex4 = st.columns([1.1, 1.1, 1.0, 1.0])
 
     export_period = ex1.selectbox(
         "Periodo PDF", ["Mes", "Quincena"],
@@ -840,7 +1025,7 @@ def render_resumen(api=None):
         value=st.session_state.get("resumen_week", date.today()),
         key="resumen_export_reference",
     )
-    ex3.caption("Respeta el filtro de tienda y busqueda activa.")
+    st.caption("El PDF y el Excel respetan los filtros activos de tienda, busqueda y persona.")
 
     export_start, export_end, period_label = _period_bounds(export_period, export_reference)
     export_rows = _collect_period_rows(
@@ -875,6 +1060,30 @@ def render_resumen(api=None):
             mime="application/pdf",
             use_container_width=True,
         )
+        excel_bytes = _build_attendance_excel(
+            period_label         = period_label,
+            selected_store_label = selected_store_label,
+            search_query         = search_query,
+            selected_worker_label = selected_worker_label,
+            workers              = filtered_workers,
+            rows                 = export_rows,
+            start_date           = export_start,
+            end_date             = export_end,
+        )
+        if excel_bytes:
+            excel_name = (
+                f"asistencias_{_sanitize_filename(period_label)}_"
+                f"{_sanitize_filename(selected_store_label)}.xlsx"
+            )
+            ex4.download_button(
+                "Exportar Excel",
+                data=excel_bytes,
+                file_name=excel_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        else:
+            ex4.info("Instala openpyxl para exportar Excel.")
         if pending_justifications:
             ex3.caption(
                 f"{len(pending_justifications)} registro(s) pendientes de justificar no se exportan aún."
