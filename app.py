@@ -8,8 +8,8 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 def run_streamlit():
     """Ejecuta streamlit en un subproceso."""
-    # La ruta correcta al archivo principal de tu app, que ahora está en la raíz.
-    path_to_app = os.path.join(os.path.dirname(__file__), '..', '..', 'main_app.py')
+    # La ruta correcta al archivo principal de tu app (asumiendo que lo renombraste a main_app.py en la raíz)
+    path_to_app = os.path.join(os.path.dirname(__file__), '..', '..', 'main_app.py') # Esta ruta es teórica para el entorno de Netlify
     command = ["streamlit", "run", path_to_app, "--server.port", "8501", "--server.headless", "true"]
     subprocess.run(command)
 
