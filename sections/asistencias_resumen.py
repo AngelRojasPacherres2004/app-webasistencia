@@ -880,10 +880,7 @@ def render_resumen(api=None):
     <hr style="margin:0.75rem 0 1.5rem;border-color:#dde1ea;">
     """, unsafe_allow_html=True)
 
-    asistencias  = api.get_asistencia_resumen()
-    trabajadores = api.get_trabajadores()
-    tiendas      = api.get_tiendas()
-    horarios     = api.get_horarios_trabajador()
+    asistencias, trabajadores, tiendas, horarios = api.get_resumen_dashboard()
 
     store_options = {"Todas": None}
     store_options.update({

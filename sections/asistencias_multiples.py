@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 sys.path.append(str(Path(__file__).parent.parent))
-from config.db import get_connection
+from config.db import get_pooled_connection
 
 
 LIMA_TZ = ZoneInfo("America/Lima")
@@ -19,14 +19,14 @@ LIMA_TZ = ZoneInfo("America/Lima")
 # ================================================================
 
 def _get_tiendas():
-    with get_connection() as conn:
+    with get_pooled_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT id_tienda, nombre, direccion FROM public.tienda ORDER BY nombre")
             return cur.fetchall()
 
 
 def _get_trabajadores(id_tienda=None):
-    with get_connection() as conn:
+    with get_pooled_connection() as conn:
         with conn.cursor() as cur:
             if id_tienda:
                 cur.execute(
@@ -41,7 +41,7 @@ def _get_trabajadores(id_tienda=None):
 def _get_asistencias(fecha_inicio, fecha_fin, id_tienda=None, id_trabajador=None):
     inicio_local = datetime.combine(fecha_inicio, datetime.min.time(), tzinfo=LIMA_TZ)
     fin_local = datetime.combine(fecha_fin + timedelta(days=1), datetime.min.time(), tzinfo=LIMA_TZ)
-    with get_connection() as conn:
+    with get_pooled_connection() as conn:
         with conn.cursor() as cur:
             query = """
                 SELECT
@@ -164,9 +164,20 @@ def render_asistencias_multiples(api=None):
         unsafe_allow_html=True,
     )
 
-    # Cargar tiendas
+    # Reutiliza los datos ya cargados por el panel para evitar otra consulta.
     try:
-        tiendas = _get_tiendas()
+        tiendas = (
+            [
+                {
+                    "id_tienda": store.get("id_tienda", ""),
+                    "nombre": store.get("nombre_tienda", ""),
+                    "direccion": store.get("direccion", ""),
+                }
+                for store in api.get_tiendas()
+            ]
+            if api is not None
+            else _get_tiendas()
+        )
     except Exception as e:
         st.error(f"Error al conectar con la base de datos: {e}")
         return
@@ -183,7 +194,21 @@ def render_asistencias_multiples(api=None):
         id_tienda_filter = tienda_map.get(selected_tienda) if selected_tienda != "Todas" else None
 
         try:
-            trabajadores = _get_trabajadores(id_tienda_filter)
+            if api is not None:
+                trabajadores = [
+                    {
+                        "dni": worker.get("dni", ""),
+                        "nombre": worker.get("nombre_trabajador", ""),
+                    }
+                    for worker in api.get_trabajadores()
+                    if worker.get("estado", True)
+                    and (
+                        not id_tienda_filter
+                        or str(worker.get("id_sede", "")) == str(id_tienda_filter)
+                    )
+                ]
+            else:
+                trabajadores = _get_trabajadores(id_tienda_filter)
         except Exception:
             trabajadores = []
 

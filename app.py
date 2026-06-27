@@ -2,7 +2,6 @@
 from uuid import uuid4
 from datetime import date, datetime, time
 from types import SimpleNamespace
-import base64
 from zoneinfo import ZoneInfo
 try:
     import tomllib
@@ -30,6 +29,7 @@ from supabase_backend import (
     create_store_with_qr as backend_create_store_with_qr,
     document_exists as backend_document_exists,
     delete_document,
+    fetch_row_sets,
     fetch_rows,
     hash_password,
     server_timestamp,
@@ -44,9 +44,6 @@ st.set_page_config(
 )
 
 BACKGROUND_IMAGE_PATH = Path("fondo.png")
-background_image_b64 = ""
-if BACKGROUND_IMAGE_PATH.exists():
-    background_image_b64 = base64.b64encode(BACKGROUND_IMAGE_PATH.read_bytes()).decode("utf-8")
 
 # ?? Tema visual ????????????????????????????????????????????????????????????????
 
@@ -307,9 +304,7 @@ def invalidate_collection_cache(collection_name):
 
 
 # ── Queries cacheadas ──────────────────────────────────────────────────────────
-@st.cache_data(ttl=60, show_spinner=False)
-def _get_tiendas_cached(cache_version):
-    docs = fetch_rows(STORE_COLLECTION, order_by=("nombre", False))
+def _build_tiendas(docs):
     tiendas = []
     for data in docs:
         tiendas.append({
@@ -325,24 +320,20 @@ def _get_tiendas_cached(cache_version):
             "fecha_apertura": data.get("fecha_apertura", ""),
             "estado": data.get("estado", True),
         })
-    return sorted(tiendas, key=lambda x: x["nombre_tienda"])
+    return sorted(tiendas, key=lambda item: item["nombre_tienda"])
 
 
-def get_tiendas():
-    return _get_tiendas_cached(_cache_version(DATA_CACHE_KEYS["stores"]))
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _get_trabajadores_cached(cache_version):
-    docs = fetch_rows(WORKER_COLLECTION, order_by=("nombre", False))
-    tiendas = {row["id_tienda"]: row for row in get_tiendas()}
-    horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
+def _build_trabajadores(docs, tiendas, horarios):
+    stores_by_id = {row["id_tienda"]: row for row in tiendas}
     schedule_map = {}
     for row in horarios:
-        schedule_map.setdefault(row.get("dni_trabajador", ""), {})[row.get("dia_semana", "")] = row
+        schedule_map.setdefault(
+            row.get("dni_trabajador", ""), {}
+        )[row.get("dia_semana", "")] = row
+
     trabajadores = []
     for data in docs:
-        tienda = tiendas.get(data.get("id_tienda", ""), {})
+        tienda = stores_by_id.get(data.get("id_tienda", ""), {})
         horario = schedule_map.get(data.get("dni", ""), {})
         trabajadores.append({
             "doc_id": data.get("dni", ""),
@@ -364,22 +355,16 @@ def _get_trabajadores_cached(cache_version):
             "horario": horario,
             "estado": bool(data.get("estado", True)),
         })
-    return sorted(trabajadores, key=lambda x: x["nombre_trabajador"])
+    return sorted(trabajadores, key=lambda item: item["nombre_trabajador"])
 
 
-def get_trabajadores():
-    return _get_trabajadores_cached(_cache_version(DATA_CACHE_KEYS["workers"]))
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _get_horarios_trabajador_cached(cache_version):
-    horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
-    trabajadores = {row["dni"]: row for row in get_trabajadores()}
-    tiendas = {row["id_tienda"]: row for row in get_tiendas()}
+def _build_horarios(horarios, trabajadores, tiendas):
+    workers_by_dni = {row["dni"]: row for row in trabajadores}
+    stores_by_id = {row["id_tienda"]: row for row in tiendas}
     rows = []
     for item in horarios:
-        worker = trabajadores.get(item.get("dni_trabajador", ""), {})
-        tienda = tiendas.get(worker.get("id_sede", ""), {})
+        worker = workers_by_dni.get(item.get("dni_trabajador", ""), {})
+        tienda = stores_by_id.get(worker.get("id_sede", ""), {})
         rows.append({
             "dni_trabajador": item.get("dni_trabajador", ""),
             "nombre_trabajador": worker.get("nombre_trabajador", ""),
@@ -394,8 +379,58 @@ def _get_horarios_trabajador_cached(cache_version):
     return rows
 
 
+def _build_asistencia_resumen(docs):
+    rows = []
+    for data in docs:
+        row = build_attendance_row(data, data)
+        row["nombre_trabajador"] = data.get(
+            "nombre_trabajador", row.get("nombre_trabajador", "")
+        )
+        row["nombre_tienda"] = data.get(
+            "nombre_tienda", row.get("nombre_tienda", "")
+        )
+        row["id_tienda"] = data.get("id_tienda", row.get("id_tienda", ""))
+        row["cargo"] = data.get("cargo", "")
+        rows.append(row)
+
+    unique_rows = {item["ruta"]: item for item in rows}
+    return sorted(
+        unique_rows.values(),
+        key=lambda item: item["fecha_orden"] or item["fecha"],
+        reverse=True,
+    )
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _get_tiendas_cached(cache_version):
+    docs = fetch_rows(STORE_COLLECTION, order_by=("nombre", False))
+    return _build_tiendas(docs)
+
+
+def get_tiendas():
+    return get_resumen_dashboard()[2]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _get_trabajadores_cached(cache_version):
+    docs = fetch_rows(WORKER_COLLECTION, order_by=("nombre", False))
+    tiendas = get_tiendas()
+    horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
+    return _build_trabajadores(docs, tiendas, horarios)
+
+
+def get_trabajadores():
+    return get_resumen_dashboard()[1]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _get_horarios_trabajador_cached(cache_version):
+    horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
+    return _build_horarios(horarios, get_trabajadores(), get_tiendas())
+
+
 def get_horarios_trabajador():
-    return _get_horarios_trabajador_cached(_cache_version(DATA_CACHE_KEYS["schedules"]))
+    return get_resumen_dashboard()[3]
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -453,27 +488,50 @@ def _get_asistencia_resumen_cached(cache_version):
         ATTENDANCE_RESUME_VIEW,
         order_by=(("fecha", True), ("id_asistencia", True)),
     )
-    rows = []
-    for data in docs:
-        row = build_attendance_row(data, data)
-        row["nombre_trabajador"] = data.get("nombre_trabajador", row.get("nombre_trabajador", ""))
-        row["nombre_tienda"] = data.get("nombre_tienda", row.get("nombre_tienda", ""))
-        row["id_tienda"] = data.get("id_tienda", row.get("id_tienda", ""))
-        row["cargo"] = data.get("cargo", "")
-        rows.append(row)
-
-    unique_rows = {item["ruta"]: item for item in rows}
-    return sorted(
-        unique_rows.values(),
-        key=lambda item: item["fecha_orden"] or item["fecha"],
-        reverse=True,
-    )
+    return _build_asistencia_resumen(docs)
 
 
 def get_asistencia_resumen():
-    return _get_asistencia_resumen_cached(
-        _cache_version(DATA_CACHE_KEYS["attendance_resume"])
+    return get_resumen_dashboard()[0]
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_resumen_dashboard_cached(cache_versions):
+    row_sets = fetch_row_sets({
+        "asistencias": {
+            "table_name": ATTENDANCE_RESUME_VIEW,
+            "order_by": (("fecha", True), ("id_asistencia", True)),
+        },
+        "trabajadores": {
+            "table_name": WORKER_COLLECTION,
+            "order_by": ("nombre", False),
+        },
+        "tiendas": {
+            "table_name": STORE_COLLECTION,
+            "order_by": ("nombre", False),
+        },
+        "horarios": {
+            "table_name": "horario_trabajador",
+            "order_by": (("dni_trabajador", False), ("dia_semana", False)),
+        },
+    })
+    tiendas = _build_tiendas(row_sets["tiendas"])
+    trabajadores = _build_trabajadores(
+        row_sets["trabajadores"], tiendas, row_sets["horarios"]
     )
+    horarios = _build_horarios(row_sets["horarios"], trabajadores, tiendas)
+    asistencias = _build_asistencia_resumen(row_sets["asistencias"])
+    return asistencias, trabajadores, tiendas, horarios
+
+
+def get_resumen_dashboard():
+    cache_versions = (
+        _cache_version(DATA_CACHE_KEYS["attendance_resume"]),
+        _cache_version(DATA_CACHE_KEYS["workers"]),
+        _cache_version(DATA_CACHE_KEYS["stores"]),
+        _cache_version(DATA_CACHE_KEYS["schedules"]),
+    )
+    return _get_resumen_dashboard_cached(cache_versions)
 
 
 # ── Componentes UI ─────────────────────────────────────────────────────────────
@@ -969,6 +1027,7 @@ def build_section_context():
         get_asistencias=get_asistencias,
         get_asistencias_trabajador=get_asistencias_trabajador,
         get_asistencia_resumen=get_asistencia_resumen,
+        get_resumen_dashboard=get_resumen_dashboard,
         get_horarios_trabajador=get_horarios_trabajador,
         get_tiendas=get_tiendas,
         get_trabajadores=get_trabajadores,
@@ -1000,18 +1059,19 @@ def admin_page():
 
     st.markdown('<div class="admin-content-wrapper"></div>', unsafe_allow_html=True)
 
-    with st.sidebar:
+    sidebar_placeholder = st.sidebar.empty()
+    with sidebar_placeholder.container():
         st.markdown("""
-        <div style="position: relative; z-index: 2;">
-        <div style="padding:1rem 0 1.5rem; text-align: center;">
-            <div style="font-family:'Space Mono',monospace;font-size:1.1rem;color:#ffffff;font-weight:700; width:100%;">
-                Admin Asistencia
+            <div style="position: relative; z-index: 2;">
+            <div style="padding:1rem 0 1.5rem; text-align: center;">
+                <div style="font-family:'Space Mono',monospace;font-size:1.1rem;color:#ffffff;font-weight:700; width:100%;">
+                    Admin Asistencia
+                </div>
+                <div style="font-size:0.78rem;color:#ffffff;margin-top:0.3rem;font-weight:500; width:100%;">
+                    Panel de RRHH
+                </div>
             </div>
-            <div style="font-size:0.78rem;color:#ffffff;margin-top:0.3rem;font-weight:500; width:100%;">
-                Panel de RRHH
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
         current_page = st.radio(
             "Sección",
             options=list(pages.keys()),
@@ -1022,33 +1082,41 @@ def admin_page():
 
         if st.button("↪ Cerrar sesión", use_container_width=True, key="logout_btn"):
             logout()
-            st.rerun()
+            sidebar_placeholder.empty()
+            return True
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Apply background image to entire content area
-    hero_banner_style = ""
-    if background_image_b64:
-        hero_banner_style = f"""
+    # Stream the background instead of embedding ~10 MB of base64 on every
+    # navigation rerun.
+    if BACKGROUND_IMAGE_PATH.exists():
+        with st.container(key="admin_background"):
+            st.image(str(BACKGROUND_IMAGE_PATH), width="stretch")
+        st.markdown(
+            """
         <style>
-            html, body, [data-testid="stAppViewContainer"] {{
-                background-image: url('data:image/png;base64,{background_image_b64}') !important;
-                background-size: cover !important;
-                background-position: center !important;
-                background-repeat: no-repeat !important;
-                background-color: transparent !important;
-            }}
-            .main .block-container {{
-                background-image: url('data:image/png;base64,{background_image_b64}') !important;
-                background-size: cover !important;
-                background-position: center !important;
-                background-repeat: no-repeat !important;
-                background-color: transparent !important;
-            }}
+        .st-key-admin_background,
+        .st-key-admin_background [data-testid="stImage"],
+        .st-key-admin_background img {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            object-fit: cover !important;
+            object-position: center center !important;
+            pointer-events: none !important;
+        }
+
+        .st-key-admin_background {
+            z-index: -1 !important;
+        }
         </style>
-        """
-    
-    st.markdown(hero_banner_style, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
     
     st.markdown("""
     <div class="hero-banner">
@@ -1077,14 +1145,28 @@ def admin_page():
     """.replace("{current_page}", current_page), unsafe_allow_html=True)
 
     pages[current_page](build_section_context())
+    return False
 
 
 def main():
+    login_placeholder = None
     hydrate_auth_from_query_params()
     if not is_authenticated():
+        authenticated, login_placeholder = render_login()
+        if not authenticated:
+            return
+
+    admin_placeholder = st.empty()
+    with admin_placeholder.container():
+        logged_out = admin_page()
+
+    if logged_out:
+        admin_placeholder.empty()
         render_login()
         return
-    admin_page()
+
+    if login_placeholder is not None:
+        login_placeholder.empty()
 
 
 if __name__ == "__main__":

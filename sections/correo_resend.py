@@ -7,27 +7,31 @@ import streamlit as st
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
-from config.db import get_connection
+from config.db import get_pooled_connection
 
 
 # ================================================================
 #  HELPERS DB
 # ================================================================
 
+@st.cache_data(ttl=60, show_spinner=False)
 def _get_tiendas():
-    with get_connection() as conn:
+    with get_pooled_connection() as conn:
         with conn.cursor() as cur:
             cur.execute('SELECT id_tienda, nombre FROM public.tienda ORDER BY nombre')
             return cur.fetchall()
 
+
+@st.cache_data(ttl=60, show_spinner=False)
 def _get_configs():
-    with get_connection() as conn:
+    with get_pooled_connection() as conn:
         with conn.cursor() as cur:
             cur.execute('SELECT * FROM public.alerta_puntualidad_config ORDER BY tipo_reporte, hora_envio')
             return cur.fetchall()
 
+
 def _create_config(payload: dict):
-    with get_connection() as conn:
+    with get_pooled_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -48,9 +52,10 @@ def _create_config(payload: dict):
                 ),
             )
         conn.commit()
+    _get_configs.clear()
 
 def _update_config(id_config: str, payload: dict):
-    with get_connection() as conn:
+    with get_pooled_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -76,15 +81,17 @@ def _update_config(id_config: str, payload: dict):
                 ),
             )
         conn.commit()
+    _get_configs.clear()
 
 def _delete_config(id_config: str):
-    with get_connection() as conn:
+    with get_pooled_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 'DELETE FROM public.alerta_puntualidad_config WHERE id_config = %s',
                 (id_config,),
             )
         conn.commit()
+    _get_configs.clear()
 
 
 # ================================================================
@@ -103,7 +110,17 @@ def render_correo(api=None):
     )
 
     try:
-        tiendas = _get_tiendas()
+        tiendas = (
+            [
+                {
+                    "id_tienda": store.get("id_tienda", ""),
+                    "nombre": store.get("nombre_tienda", ""),
+                }
+                for store in api.get_tiendas()
+            ]
+            if api is not None
+            else _get_tiendas()
+        )
         configs = _get_configs()
     except Exception as e:
         st.error(f"Error al conectar con la base de datos: {e}")

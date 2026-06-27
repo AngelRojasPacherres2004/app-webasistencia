@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import closing
 from datetime import datetime, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -8,7 +7,7 @@ from zoneinfo import ZoneInfo
 import bcrypt
 from psycopg2 import sql
 
-from config.db import get_connection
+from config.db import get_connection, get_pooled_connection
 
 
 TABLE_KEY_FIELDS = {
@@ -99,7 +98,7 @@ def _build_where(filters, params):
 
 def _fetch_all(query, params=None):
     params = params or []
-    with closing(get_connection()) as connection:
+    with get_pooled_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(query, params)
             return cursor.fetchall() or []
@@ -107,7 +106,7 @@ def _fetch_all(query, params=None):
 
 def _fetch_one(query, params=None):
     params = params or []
-    with closing(get_connection()) as connection:
+    with get_pooled_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(query, params)
             return cursor.fetchone()
@@ -115,7 +114,7 @@ def _fetch_one(query, params=None):
 
 def _execute(query, params=None, fetch=False):
     params = params or []
-    with closing(get_connection()) as connection:
+    with get_pooled_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(query, params)
             result = cursor.fetchone() if fetch else None
@@ -123,7 +122,7 @@ def _execute(query, params=None, fetch=False):
         return result
 
 
-def fetch_rows(table_name, select="*", filters=None, order_by=None, limit=None):
+def _build_select_query(table_name, select="*", filters=None, order_by=None, limit=None):
     params = []
     query = sql.SQL("SELECT {select} FROM {table}").format(
         select=_normalize_select(select),
@@ -134,7 +133,30 @@ def fetch_rows(table_name, select="*", filters=None, order_by=None, limit=None):
     if limit is not None:
         query += sql.SQL(" LIMIT %s")
         params.append(int(limit))
+    return query, params
+
+
+def fetch_rows(table_name, select="*", filters=None, order_by=None, limit=None):
+    query, params = _build_select_query(
+        table_name,
+        select=select,
+        filters=filters,
+        order_by=order_by,
+        limit=limit,
+    )
     return _fetch_all(query, params)
+
+
+def fetch_row_sets(requests):
+    """Run several read queries through a single database connection."""
+    results = {}
+    with get_pooled_connection() as connection:
+        with connection.cursor() as cursor:
+            for key, options in requests.items():
+                query, params = _build_select_query(**options)
+                cursor.execute(query, params)
+                results[key] = cursor.fetchall() or []
+    return results
 
 
 def document_exists(table_name, doc_id, key_field=None):
@@ -264,7 +286,7 @@ def create_store_with_qr(store_table, qr_table, document_id, store_data):
     store_payload = dict(store_data or {})
     store_payload["id_tienda"] = document_id
 
-    with closing(get_connection()) as connection:
+    with get_pooled_connection() as connection:
         with connection.cursor() as cursor:
             store_columns = list(store_payload.keys())
             store_values = list(store_payload.values())

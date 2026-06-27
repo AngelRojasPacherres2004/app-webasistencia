@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import hmac
 import json
@@ -6,6 +5,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from supabase_backend import get_admin_by_email, verify_password
 
@@ -163,10 +163,194 @@ def _check_credentials(input_user, input_pass):
     return hmac.compare_digest(username, "admin") and hmac.compare_digest(password, "admin123")
 
 
-def render_login():
-    login_video_b64 = ""
+def _render_login_content():
+    # Paint a lightweight layer before the streamed video becomes ready. It
+    # immediately covers Streamlit's stale dashboard during logout.
+    st.markdown(
+        """
+        <style>
+        [data-testid="stAppViewContainer"] > .main {
+            position: relative !important;
+            z-index: 1100 !important;
+        }
+
+        [data-testid="stHeader"] {
+            z-index: 1200 !important;
+        }
+
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarCollapsedControl"] {
+            display: none !important;
+        }
+
+        [data-testid="stElementContainer"] {
+            opacity: 1 !important;
+            transition: none !important;
+        }
+
+        .login-transition-cover {
+            position: fixed;
+            inset: 0;
+            z-index: 1099;
+            background:
+                radial-gradient(circle at 18% 25%, rgba(148, 163, 184, 0.20), transparent 30%),
+                radial-gradient(circle at 82% 70%, rgba(203, 213, 225, 0.28), transparent 34%),
+                #e9ece8;
+            pointer-events: none;
+        }
+
+        [data-testid="stVideo"] {
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 1100 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            object-fit: cover !important;
+            object-position: center center !important;
+            display: block !important;
+            pointer-events: none !important;
+        }
+
+        [data-testid="stVideo"]::-webkit-media-controls,
+        [data-testid="stVideo"]::-webkit-media-controls-enclosure,
+        [data-testid="stVideo"]::-webkit-media-controls-overlay-enclosure,
+        [data-testid="stVideo"]::-webkit-media-controls-panel,
+        [data-testid="stVideo"]::-webkit-media-controls-overlay-play-button,
+        [data-testid="stVideo"]::-webkit-media-controls-start-playback-button,
+        [data-testid="stVideo"]::-webkit-media-controls-timeline,
+        [data-testid="stVideo"]::-webkit-media-controls-current-time-display,
+        [data-testid="stVideo"]::-webkit-media-controls-time-remaining-display,
+        [data-testid="stVideo"]::-webkit-media-controls-mute-button,
+        [data-testid="stVideo"]::-webkit-media-controls-fullscreen-button {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+        }
+
+        [data-testid="stVideo"] video {
+            width: 100vw !important;
+            height: 100vh !important;
+            object-fit: cover !important;
+        }
+
+        .login-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1101;
+            background: rgba(0, 0, 0, 0.34);
+            pointer-events: none;
+        }
+
+        [data-testid="stForm"] {
+            position: relative !important;
+            z-index: 1102 !important;
+        }
+
+        [data-testid="stHorizontalBlock"]:has([data-testid="stForm"]) {
+            position: relative !important;
+            z-index: 1102 !important;
+        }
+        </style>
+        <div class="login-transition-cover"></div>
+        <div class="login-overlay"></div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _, center, _ = st.columns([1, 1.5, 1])
+    with center:
+        with st.form("admin_login_form", clear_on_submit=False):
+            st.markdown(
+                """
+                <div class="login-logo">
+                    <h1>⬡ ADMIN</h1>
+                    <p>Gestión de Asistencia y Personal</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            username = st.text_input("Usuario / Correo", placeholder="admin@empresa.com")
+            password = st.text_input("Contraseña", type="password", placeholder="••••••••")
+            submit = st.form_submit_button("Entrar al Panel", use_container_width=True)
+
+        if submit:
+            try:
+                input_error = _validate_login_input(username, password)
+                if input_error:
+                    st.error(input_error)
+                elif _check_credentials(username, password):
+                    auth_token = _build_auth_token(username)
+                    _apply_authenticated_state(username, auth_token)
+                    return True
+                else:
+                    st.error("Correo o contrasena incorrectos.")
+            except Exception as exc:
+                st.error(f"Error al iniciar sesion: {exc}")
+
     if LOGIN_VIDEO_PATH.exists():
-        login_video_b64 = base64.b64encode(LOGIN_VIDEO_PATH.read_bytes()).decode("utf-8")
+        components.html(
+            """
+            <script>
+            (() => {
+                const parentDocument = window.parent.document;
+
+                const configureLoginVideo = () => {
+                    const video = parentDocument.querySelector('[data-testid="stVideo"]');
+                    if (!video) return false;
+
+                    video.controls = false;
+                    video.removeAttribute("controls");
+                    video.setAttribute("playsinline", "");
+                    video.setAttribute(
+                        "controlslist",
+                        "nodownload nofullscreen noremoteplayback"
+                    );
+                    video.disablePictureInPicture = true;
+                    video.muted = true;
+                    video.loop = true;
+                    video.autoplay = true;
+                    video.play().catch(() => {});
+                    return true;
+                };
+
+                if (parentDocument.documentElement.dataset.loginSubmitHandler !== "true") {
+                    parentDocument.documentElement.dataset.loginSubmitHandler = "true";
+                    parentDocument.addEventListener("click", (event) => {
+                        const button = event.target.closest?.(
+                            '[data-testid="stForm"] button[type="submit"]'
+                        );
+                        if (!button) return;
+
+                        button.style.cursor = "wait";
+                        const label = button.querySelector("p");
+                        if (label) label.textContent = "Ingresando…";
+                    }, true);
+                }
+
+                const configureLogin = () => {
+                    configureLoginVideo();
+                };
+
+                const observer = new MutationObserver(configureLogin);
+                observer.observe(parentDocument.documentElement, {
+                    childList: true,
+                    subtree: true,
+                });
+                window.addEventListener("unload", () => observer.disconnect());
+                configureLogin();
+            })();
+            </script>
+            """,
+            height=0,
+            width=0,
+        )
+        st.video(
+            str(LOGIN_VIDEO_PATH),
+            format="video/mp4",
+            autoplay=True,
+            muted=True,
+            loop=True,
+        )
 
     st.markdown(
         f"""
@@ -175,17 +359,48 @@ def render_login():
             background: transparent !important;
         }}
 
-        .login-video-wrap {{
-            position: fixed;
-            inset: 0;
-            z-index: -2;
-            overflow: hidden;
+        [data-testid="stAppViewContainer"] > .main {{
+            position: relative !important;
+            z-index: 1100 !important;
         }}
 
-        .login-video-wrap video {{
+        [data-testid="stHeader"] {{
+            z-index: 1200 !important;
+        }}
+
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarCollapsedControl"] {{
+            display: none !important;
+        }}
+
+        [data-testid="stVideo"] {{
+            position: fixed;
+            inset: 0;
+            z-index: 1100;
+            overflow: hidden;
+            background: transparent;
+            object-fit: cover !important;
+            object-position: center center !important;
+            display: block !important;
+            pointer-events: none;
+        }}
+
+        [data-testid="stVideo"]::-webkit-media-controls,
+        [data-testid="stVideo"]::-webkit-media-controls-enclosure,
+        [data-testid="stVideo"]::-webkit-media-controls-overlay-enclosure,
+        [data-testid="stVideo"]::-webkit-media-controls-panel,
+        [data-testid="stVideo"]::-webkit-media-controls-overlay-play-button,
+        [data-testid="stVideo"]::-webkit-media-controls-start-playback-button {{
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+        }}
+
+        [data-testid="stVideo"] video {{
             width: 100%;
             height: 100%;
             object-fit: cover;
+            background: transparent;
         }}
 
         .login-overlay {{
@@ -193,7 +408,8 @@ def render_login():
             position: fixed;
             inset: 0;
             background: rgba(0, 0, 0, 0.34) !important;
-            z-index: -1;
+            z-index: 1101;
+            pointer-events: none;
         }}
 
         .main .block-container {{
@@ -203,12 +419,19 @@ def render_login():
         }}
 
         [data-testid="stForm"] {{
+            position: relative !important;
+            z-index: 1102 !important;
             background: rgba(255, 255, 255, 0.05) !important;
             backdrop-filter: blur(20px) !important;
             border: 1px solid rgba(255, 255, 255, 0.1) !important;
             border-radius: 28px !important;
             padding: 3rem 2.5rem !important;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+        }}
+
+        [data-testid="stHorizontalBlock"]:has([data-testid="stForm"]) {{
+            position: relative !important;
+            z-index: 1102 !important;
         }}
 
         .login-logo {{
@@ -270,47 +493,17 @@ def render_login():
             border-color: rgba(255, 255, 255, 0.4) !important;
         }}
         </style>
-
-        <div class="login-video-wrap">
-            <video autoplay muted loop playsinline>
-                <source src="data:video/mp4;base64,{login_video_b64}" type="video/mp4">
-            </video>
-        </div>
-        <div class="login-overlay"></div>
         """,
         unsafe_allow_html=True,
     )
 
-    _, center, _ = st.columns([1, 1.5, 1])
-    with center:
-        with st.form("admin_login_form", clear_on_submit=False):
-            st.markdown(
-                """
-                <div class="login-logo">
-                    <h1>⬡ ADMIN</h1>
-                    <p>Gestión de Asistencia y Personal</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            username = st.text_input("Usuario / Correo", placeholder="admin@empresa.com")
-            password = st.text_input("Contraseña", type="password", placeholder="••••••••")
-            submit = st.form_submit_button("Entrar al Panel", use_container_width=True)
+    return False
 
-        if submit:
-            try:
-                input_error = _validate_login_input(username, password)
-                if input_error:
-                    st.error(input_error)
-                    return
 
-                if _check_credentials(username, password):
-                    auth_token = _build_auth_token(username)
-                    _apply_authenticated_state(username, auth_token)
-                    st.success("Acceso correcto.")
-                    st.rerun()
-                    return
+def render_login():
+    """Render the login and return its placeholder for a clean transition."""
+    login_placeholder = st.empty()
+    with login_placeholder.container():
+        authenticated = _render_login_content()
 
-                st.error("Correo o contrasena incorrectos.")
-            except Exception as exc:
-                st.error(f"Error al iniciar sesion: {exc}")
+    return authenticated, login_placeholder
