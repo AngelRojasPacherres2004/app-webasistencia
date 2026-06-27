@@ -242,6 +242,51 @@ def _render_login_content():
             pointer-events: none;
         }
 
+        .login-auth-loading {
+            position: fixed;
+            inset: 0;
+            z-index: 5000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            background:
+                radial-gradient(circle at 50% 42%, #1e3a5f 0%, #16213e 42%, #0f172a 100%);
+            color: #ffffff;
+            font-family: 'Space Mono', monospace;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.15s ease;
+        }
+
+        html.login-submitting .login-auth-loading {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+        }
+
+        .login-auth-loading__spinner {
+            width: 2.6rem;
+            height: 2.6rem;
+            border: 3px solid rgba(255, 255, 255, 0.22);
+            border-top-color: #ffffff;
+            border-radius: 50%;
+            animation: loginAuthSpin 0.75s linear infinite;
+        }
+
+        .login-auth-loading__text {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        @keyframes loginAuthSpin {
+            to { transform: rotate(360deg); }
+        }
+
         [data-testid="stForm"] {
             position: relative !important;
             z-index: 1102 !important;
@@ -265,6 +310,10 @@ def _render_login_content():
         </style>
         <div class="login-transition-cover"></div>
         <div class="login-overlay"></div>
+        <div class="login-auth-loading" role="status" aria-live="polite">
+            <div class="login-auth-loading__spinner"></div>
+            <div class="login-auth-loading__text">Cargando panel…</div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -306,6 +355,7 @@ def _render_login_content():
             (() => {
                 const parentDocument = window.parent.document;
                 parentDocument.documentElement.classList.remove("admin-ready");
+                parentDocument.documentElement.classList.remove("login-submitting");
 
                 const configureLoginVideo = () => {
                     const video = parentDocument.querySelector('[data-testid="stVideo"]');
@@ -328,6 +378,10 @@ def _render_login_content():
 
                 if (parentDocument.documentElement.dataset.loginSubmitHandler !== "true") {
                     parentDocument.documentElement.dataset.loginSubmitHandler = "true";
+                    const showLoginLoading = () => {
+                        parentDocument.documentElement.classList.add("login-submitting");
+                    };
+
                     parentDocument.addEventListener("click", (event) => {
                         const button = event.target.closest?.(
                             '[data-testid="stForm"] button[type="submit"]'
@@ -337,6 +391,16 @@ def _render_login_content():
                         button.style.cursor = "wait";
                         const label = button.querySelector("p");
                         if (label) label.textContent = "Ingresando…";
+                        showLoginLoading();
+                    }, true);
+
+                    parentDocument.addEventListener("keydown", (event) => {
+                        if (
+                            event.key === "Enter"
+                            && event.target.closest?.('[data-testid="stForm"]')
+                        ) {
+                            showLoginLoading();
+                        }
                     }, true);
                 }
 

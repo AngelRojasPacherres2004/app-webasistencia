@@ -1135,6 +1135,7 @@ def admin_page():
             (() => {
                 const parentDocument = window.parent.document;
                 const revealAdmin = () => {
+                    parentDocument.documentElement.classList.remove("login-submitting");
                     parentDocument.documentElement.classList.add("admin-ready");
                 };
 
