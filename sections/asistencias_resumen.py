@@ -432,6 +432,8 @@ def _build_attendance_pdf(period_label, selected_store_label, search_query,
     C_ROW_ALT    = colors.HexColor("#f8fafc")    # fila alternada
     C_ACCENT     = colors.HexColor("#2563eb")
     C_GREEN_TEXT = colors.HexColor("#166534")
+    C_JUST_BLUE  = colors.HexColor("#5b8def")
+    C_JUST_BLUE_TEXT = colors.HexColor("#1d4ed8")
     C_RED_TEXT   = colors.HexColor("#991b1b")
     C_RED_BG     = colors.HexColor("#dc2626")
     C_SAT_BG     = colors.HexColor("#fef3c7")    # amarillo â€” tardanza
@@ -464,7 +466,7 @@ def _build_attendance_pdf(period_label, selected_store_label, search_query,
     sty_bold     = sty("bold",   bold=True,  size=7,   color=C_BLACK)
     sty_late     = sty("late",   bold=True,  size=6.5, color="#92400e", align=TA_CENTER, back_color=C_SAT_BG)
     sty_ok       = sty("ok",     bold=True,  size=6.5, color=C_GREEN_TEXT, align=TA_CENTER, back_color=colors.HexColor("#dcfce7"))
-    sty_justified = sty("just",   bold=True,  size=6.5, color="#92400e", align=TA_CENTER, back_color=colors.HexColor("#fefce8"))
+    sty_justified = sty("just",   bold=True,  size=6.5, color=C_JUST_BLUE_TEXT, align=TA_CENTER, back_color=colors.HexColor("#dbeafe"))
     sty_absent   = sty("abs",    bold=True,  size=6.5, color=C_WHITE, align=TA_CENTER, back_color=C_RED_BG)
     sty_missing  = sty("miss",   bold=True,  size=6.5, color=C_MID, align=TA_CENTER, back_color=C_ABSENT_BG)
     sty_num      = sty("num",    size=7,     color=C_MID, align=TA_CENTER)
@@ -694,24 +696,24 @@ def _cell_html(attendance_row, scheduled_entry=None, current_date=None, cell_dat
             if _as_bool(attendance_row.get("justificado")):
                 return (
                     '<div style="display:flex;flex-direction:column;gap:.12rem;line-height:1.15;'
-                    'background:#fefce8;padding:.4rem .45rem;border-radius:10px;">'
+                    'background:#dbeafe;padding:.4rem .45rem;border-radius:10px;">'
                     '<div style="font-family:Space Mono,monospace;font-size:.66rem;'
-                    'color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">'
+                    'color:#1d4ed8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">'
                     'Justificado'
                     '</div>'
-                    f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:#92400e;font-weight:700;">{entrada}</span>'
-                    f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:#92400e;font-weight:700;">{salida}</span>'
+                    f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:#1d4ed8;font-weight:700;">{entrada}</span>'
+                    f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:#1d4ed8;font-weight:700;">{salida}</span>'
                     "</div>"
                 )
             return (
                 '<div style="display:flex;flex-direction:column;gap:.12rem;line-height:1.15;'
-                'background:#fef3c7;padding:.4rem .45rem;border-radius:10px;">'
+                'background:#dbeafe;padding:.4rem .45rem;border-radius:10px;">'
                 '<div style="font-family:Space Mono,monospace;font-size:.66rem;'
-                'color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">'
+                'color:#1d4ed8;font-weight:700;text-transform:uppercase;letter-spacing:.05em;">'
                 'Justificable'
                 '</div>'
-                f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:#92400e;font-weight:700;">{entrada}</span>'
-                f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:#92400e;font-weight:700;">{salida}</span>'
+                f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:#1d4ed8;font-weight:700;">{entrada}</span>'
+                f'<span style="font-family:Space Mono,monospace;font-size:.78rem;color:#1d4ed8;font-weight:700;">{salida}</span>'
                 "</div>"
             )
         return (
@@ -846,7 +848,7 @@ def _render_pending_justifications(api, rows, schedule_map):
                     {"justificado": True},
                     key_field="id_asistencia",
                 )
-                st.cache_data.clear()
+                api.invalidate_collection_cache(api.ATTENDANCE_COLLECTION)
                 st.rerun()
             except Exception as exc:
                 st.error(f"No se pudo justificar el registro: {exc}")
@@ -878,11 +880,10 @@ def render_resumen(api=None):
     <hr style="margin:0.75rem 0 1.5rem;border-color:#dde1ea;">
     """, unsafe_allow_html=True)
 
-    with st.spinner("Cargando asistencias..."):
-        asistencias  = api.get_asistencias()
-        trabajadores = api.get_trabajadores()
-        tiendas      = api.get_tiendas()
-        horarios     = api.get_horarios_trabajador()
+    asistencias  = api.get_asistencia_resumen()
+    trabajadores = api.get_trabajadores()
+    tiendas      = api.get_tiendas()
+    horarios     = api.get_horarios_trabajador()
 
     store_options = {"Todas": None}
     store_options.update({
@@ -984,7 +985,7 @@ def render_resumen(api=None):
                          font-family:'Space Mono',monospace;font-size:0.68rem;font-weight:700;">
                 Tardanza
             </span>
-            <span style="background:#fefce8;color:#92400e;border-radius:999px;padding:0.28rem 0.6rem;
+            <span style="background:#dbeafe;color:#1d4ed8;border-radius:999px;padding:0.28rem 0.6rem;
                          font-family:'Space Mono',monospace;font-size:0.68rem;font-weight:700;">
                 Justificado
             </span>

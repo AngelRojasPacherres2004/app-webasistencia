@@ -602,7 +602,7 @@ def _render_worker_form(api, worker=None):
         api.create_document(api.WORKER_COLLECTION, doc_id, worker_data)
         api.save_worker_schedule(worker_data, selected_days, horario)
         st.session_state["worker_success_message"] = f"Trabajador guardado -> `{api.WORKER_COLLECTION}/{doc_id}`"
-        st.cache_data.clear()
+        api.invalidate_collection_cache(api.WORKER_COLLECTION)
         st.session_state[f"worker_{form_kind}_seed"] = form_seed + 1
         st.session_state["worker_form_mode"] = "list"
         st.rerun()
@@ -753,7 +753,7 @@ def render_trabajadores(api):
                             {"estado": bool(nuevo_estado)},
                             key_field="dni",
                         )
-                        st.cache_data.clear()
+                        api.invalidate_collection_cache(api.WORKER_COLLECTION)
                         st.session_state["worker_success_message"] = "✅ Estado actualizado."
                     except Exception as exc:
                         st.session_state["worker_success_message"] = f"Error: {exc}"

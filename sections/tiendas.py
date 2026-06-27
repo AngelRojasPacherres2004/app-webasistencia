@@ -203,7 +203,7 @@ def render_tiendas(api):
                             {"estado": bool(nuevo_estado)},
                             key_field="id_tienda",
                         )
-                        st.cache_data.clear()
+                        api.invalidate_collection_cache(api.STORE_COLLECTION)
                         st.session_state["store_success_message"] = "âœ… Estado actualizado."
                     except Exception as exc:
                         st.session_state["store_success_message"] = f"Error: {exc}"
@@ -265,7 +265,7 @@ def _handle_store_create(api, form):
             "estado": True,
         }
         api.create_store_with_qr(store_id, store_data)
-        st.cache_data.clear()
+        api.invalidate_collection_cache(api.STORE_COLLECTION)
         st.session_state["store_success_message"] = f"âœ“  Tienda registrada â†’ `{api.STORE_COLLECTION}/{store_id}`"
         st.session_state["store_form_seed"] = form["form_seed"] + 1
         st.session_state["store_form_mode"] = "list"
@@ -301,7 +301,7 @@ def _handle_store_update(api, store, form):
             store_data["contrasena"] = api.hash_password(form["password"])
 
         api.update_document(api.STORE_COLLECTION, store["id_tienda"], store_data, key_field="id_tienda")
-        st.cache_data.clear()
+        api.invalidate_collection_cache(api.STORE_COLLECTION)
         st.session_state["store_success_message"] = f"âœ“  Tienda guardada â†’ `{store['id_tienda']}`"
         st.session_state["store_form_seed"] = form["form_seed"] + 1
         st.session_state["store_form_mode"] = "list"

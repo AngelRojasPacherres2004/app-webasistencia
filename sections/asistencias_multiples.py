@@ -3,11 +3,15 @@ import sys
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
 sys.path.append(str(Path(__file__).parent.parent))
 from config.db import get_connection
+
+
+LIMA_TZ = ZoneInfo("America/Lima")
 
 
 # ================================================================
@@ -35,6 +39,8 @@ def _get_trabajadores(id_tienda=None):
 
 
 def _get_asistencias(fecha_inicio, fecha_fin, id_tienda=None, id_trabajador=None):
+    inicio_local = datetime.combine(fecha_inicio, datetime.min.time(), tzinfo=LIMA_TZ)
+    fin_local = datetime.combine(fecha_fin + timedelta(days=1), datetime.min.time(), tzinfo=LIMA_TZ)
     with get_connection() as conn:
         with conn.cursor() as cur:
             query = """
@@ -53,9 +59,10 @@ def _get_asistencias(fecha_inicio, fecha_fin, id_tienda=None, id_trabajador=None
                 FROM public.asistencia_multiple am
                 LEFT JOIN public.tienda t ON t.id_tienda::text = am.id_tienda::text
                 LEFT JOIN public.trabajador tr ON tr.dni = am.id_trabajador
-                WHERE DATE(am.hora_marca AT TIME ZONE 'America/Lima') BETWEEN %s AND %s
+                WHERE am.hora_marca >= %s
+                  AND am.hora_marca < %s
             """
-            params = [fecha_inicio, fecha_fin]
+            params = [inicio_local, fin_local]
 
             if id_tienda:
                 query += " AND am.id_tienda::text = %s"

@@ -19,7 +19,7 @@ except ImportError:
 
 import streamlit as st
 from cloudinary_uploader import upload_worker_file
-from login import is_authenticated, render_login, logout
+from login import hydrate_auth_from_query_params, is_authenticated, render_login, logout
 from sections.asistencias_resumen import render_resumen
 from sections.salarios import render_salarios
 from sections.tiendas import render_tiendas
@@ -36,9 +36,6 @@ from supabase_backend import (
     update_document,
     upsert_document,
 )
-from config.db import get_connection
-
-
 st.set_page_config(
     page_title="Admin · Asistencia",
     page_icon="⬡",
@@ -68,6 +65,7 @@ apply_global_css()
 WORKER_COLLECTION = "trabajador"
 STORE_COLLECTION = "tienda"
 ATTENDANCE_COLLECTION = "asistencia"
+ATTENDANCE_RESUME_VIEW = "v_asistencia_resumen"
 QR_ACTIVE_COLLECTION = "qr"
 MONTH_NAMES = (
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -82,6 +80,14 @@ SECRET_JSON_PATHS = (
     Path(".streamlit/secret.toml"),
 )
 PERU_TIMEZONE = ZoneInfo("America/Lima")
+DATA_CACHE_KEYS = {
+    "stores": "cache_v_stores",
+    "workers": "cache_v_workers",
+    "schedules": "cache_v_schedules",
+    "attendances": "cache_v_attendances",
+    "attendance_resume": "cache_v_attendance_resume",
+    "admins": "cache_v_admins",
+}
 
 
 def clean_service_account(service_account):
@@ -248,7 +254,7 @@ def document_exists(collection_name, document_id):
 
 def create_document(collection_name, document_id, data):
     upsert_document(collection_name, document_id, data)
-    st.cache_data.clear()
+    invalidate_collection_cache(collection_name)
 
 
 def create_store_with_qr(document_id, store_data):
@@ -258,13 +264,51 @@ def create_store_with_qr(document_id, store_data):
         document_id,
         store_data,
     )
-    st.cache_data.clear()
+    invalidate_collection_cache(STORE_COLLECTION)
+    invalidate_collection_cache(QR_ACTIVE_COLLECTION)
     return qr_token
 
 
+def _cache_version(key):
+    return int(st.session_state.get(key, 0))
+
+
+def _bump_cache_version(key):
+    st.session_state[key] = _cache_version(key) + 1
+
+
+def invalidate_collection_cache(collection_name):
+    collection = str(collection_name or "").strip().lower()
+    if collection == STORE_COLLECTION:
+        _bump_cache_version(DATA_CACHE_KEYS["stores"])
+        _bump_cache_version(DATA_CACHE_KEYS["workers"])
+        _bump_cache_version(DATA_CACHE_KEYS["schedules"])
+        _bump_cache_version(DATA_CACHE_KEYS["attendances"])
+        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
+    elif collection == WORKER_COLLECTION:
+        _bump_cache_version(DATA_CACHE_KEYS["workers"])
+        _bump_cache_version(DATA_CACHE_KEYS["schedules"])
+        _bump_cache_version(DATA_CACHE_KEYS["attendances"])
+        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
+    elif collection == "horario_trabajador":
+        _bump_cache_version(DATA_CACHE_KEYS["schedules"])
+        _bump_cache_version(DATA_CACHE_KEYS["workers"])
+        _bump_cache_version(DATA_CACHE_KEYS["attendances"])
+        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
+    elif collection == ATTENDANCE_COLLECTION:
+        _bump_cache_version(DATA_CACHE_KEYS["attendances"])
+        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
+    elif collection == ATTENDANCE_RESUME_VIEW:
+        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
+    elif collection == QR_ACTIVE_COLLECTION:
+        _bump_cache_version(DATA_CACHE_KEYS["stores"])
+    else:
+        st.cache_data.clear()
+
+
 # ── Queries cacheadas ──────────────────────────────────────────────────────────
-@st.cache_data(ttl=10, show_spinner=False)
-def get_tiendas():
+@st.cache_data(ttl=60, show_spinner=False)
+def _get_tiendas_cached(cache_version):
     docs = fetch_rows(STORE_COLLECTION, order_by=("nombre", False))
     tiendas = []
     for data in docs:
@@ -284,8 +328,12 @@ def get_tiendas():
     return sorted(tiendas, key=lambda x: x["nombre_tienda"])
 
 
-@st.cache_data(ttl=10, show_spinner=False)
-def get_trabajadores():
+def get_tiendas():
+    return _get_tiendas_cached(_cache_version(DATA_CACHE_KEYS["stores"]))
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _get_trabajadores_cached(cache_version):
     docs = fetch_rows(WORKER_COLLECTION, order_by=("nombre", False))
     tiendas = {row["id_tienda"]: row for row in get_tiendas()}
     horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
@@ -319,8 +367,12 @@ def get_trabajadores():
     return sorted(trabajadores, key=lambda x: x["nombre_trabajador"])
 
 
-@st.cache_data(ttl=10, show_spinner=False)
-def get_horarios_trabajador():
+def get_trabajadores():
+    return _get_trabajadores_cached(_cache_version(DATA_CACHE_KEYS["workers"]))
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _get_horarios_trabajador_cached(cache_version):
     horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
     trabajadores = {row["dni"]: row for row in get_trabajadores()}
     tiendas = {row["id_tienda"]: row for row in get_tiendas()}
@@ -342,8 +394,12 @@ def get_horarios_trabajador():
     return rows
 
 
-@st.cache_data(ttl=10, show_spinner=False)
-def get_asistencias():
+def get_horarios_trabajador():
+    return _get_horarios_trabajador_cached(_cache_version(DATA_CACHE_KEYS["schedules"]))
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_asistencias_cached(cache_version):
     docs = fetch_rows(ATTENDANCE_COLLECTION, order_by=(("fecha", True), ("id_asistencia", True)))
     trabajadores = {row["dni"]: row for row in get_trabajadores()}
     tiendas = {row["id_tienda"]: row for row in get_tiendas()}
@@ -367,8 +423,12 @@ def get_asistencias():
     )
 
 
-@st.cache_data(ttl=10, show_spinner=False)
-def get_asistencias_trabajador(id_trabajador):
+def get_asistencias():
+    return _get_asistencias_cached(_cache_version(DATA_CACHE_KEYS["attendances"]))
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_asistencias_trabajador_cached(id_trabajador, cache_version):
     docs = fetch_rows(
         ATTENDANCE_COLLECTION,
         filters=[("dni_trabajador", "eq", id_trabajador)],
@@ -378,6 +438,42 @@ def get_asistencias_trabajador(id_trabajador):
 
     unique_rows = {item["ruta"]: item for item in asistencias}
     return sorted(unique_rows.values(), key=lambda x: x["fecha_orden"], reverse=True)
+
+
+def get_asistencias_trabajador(id_trabajador):
+    return _get_asistencias_trabajador_cached(
+        id_trabajador,
+        _cache_version(DATA_CACHE_KEYS["attendances"]),
+    )
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _get_asistencia_resumen_cached(cache_version):
+    docs = fetch_rows(
+        ATTENDANCE_RESUME_VIEW,
+        order_by=(("fecha", True), ("id_asistencia", True)),
+    )
+    rows = []
+    for data in docs:
+        row = build_attendance_row(data, data)
+        row["nombre_trabajador"] = data.get("nombre_trabajador", row.get("nombre_trabajador", ""))
+        row["nombre_tienda"] = data.get("nombre_tienda", row.get("nombre_tienda", ""))
+        row["id_tienda"] = data.get("id_tienda", row.get("id_tienda", ""))
+        row["cargo"] = data.get("cargo", "")
+        rows.append(row)
+
+    unique_rows = {item["ruta"]: item for item in rows}
+    return sorted(
+        unique_rows.values(),
+        key=lambda item: item["fecha_orden"] or item["fecha"],
+        reverse=True,
+    )
+
+
+def get_asistencia_resumen():
+    return _get_asistencia_resumen_cached(
+        _cache_version(DATA_CACHE_KEYS["attendance_resume"])
+    )
 
 
 # ── Componentes UI ─────────────────────────────────────────────────────────────
@@ -872,9 +968,11 @@ def build_section_context():
         format_time=format_time,
         get_asistencias=get_asistencias,
         get_asistencias_trabajador=get_asistencias_trabajador,
+        get_asistencia_resumen=get_asistencia_resumen,
         get_horarios_trabajador=get_horarios_trabajador,
         get_tiendas=get_tiendas,
         get_trabajadores=get_trabajadores,
+        invalidate_collection_cache=invalidate_collection_cache,
         normalize_doc_id=normalize_doc_id,
         normalize_email=normalize_email,
         hash_password=hash_password,
@@ -978,17 +1076,11 @@ def admin_page():
     <hr style="margin: 0.85rem 0 1.5rem; border-color:#cfe3f7;">
     """.replace("{current_page}", current_page), unsafe_allow_html=True)
 
-    try:
-        connection = get_connection()
-        connection.close()
-    except Exception as exc:
-        st.error(f"No se pudo conectar con la base de datos: {exc}")
-        st.stop()
-
     pages[current_page](build_section_context())
 
 
 def main():
+    hydrate_auth_from_query_params()
     if not is_authenticated():
         render_login()
         return

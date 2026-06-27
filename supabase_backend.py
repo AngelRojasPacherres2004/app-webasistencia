@@ -316,6 +316,19 @@ def list_admin_rows():
     return fetch_rows("administrador", order_by=("correo", False))
 
 
+def get_admin_by_email(email):
+    email = str(email or "").strip().lower()
+    if not email:
+        return None
+
+    rows = fetch_rows(
+        "administrador",
+        filters=[("correo", "eq", email)],
+        limit=1,
+    )
+    return rows[0] if rows else None
+
+
 def get_admin_login_diagnostics():
     diagnostics = {
         "connected": False,

@@ -1,24 +1,118 @@
 import base64
+import hashlib
 import hmac
-import re
+import json
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 import streamlit as st
 
-from supabase_backend import list_admin_rows, verify_password
+from supabase_backend import get_admin_by_email, verify_password
 
 SESSION_AUTH_KEY = "admin_authenticated"
 SESSION_USER_KEY = "admin_username"
+SESSION_TOKEN_KEY = "admin_auth_token"
 LOGIN_VIDEO_PATH = Path("fondologin.mp4")
+AUTH_QUERY_PARAM = "auth"
 
 
 def is_authenticated():
     return bool(st.session_state.get(SESSION_AUTH_KEY, False))
 
 
+def _get_auth_secret():
+    try:
+        secret = str(st.secrets.get("auth_secret", "")).strip()
+        if secret:
+            return secret
+    except Exception:
+        pass
+
+    try:
+        from config.db import load_env
+
+        load_env()
+        fallback = str(st.secrets.get("database_url", "")).strip()
+    except Exception:
+        fallback = ""
+
+    if fallback:
+        return hashlib.sha256(fallback.encode("utf-8")).hexdigest()
+
+    return "web_appasistencia_auth_secret"
+
+
+def _sign_payload(payload: str) -> str:
+    secret = _get_auth_secret().encode("utf-8")
+    digest = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest
+
+
+def _build_auth_token(username: str) -> str:
+    payload = json.dumps({"u": str(username or "").strip().lower()}, separators=(",", ":"))
+    signature = _sign_payload(payload)
+    return f"{quote(payload)}.{signature}"
+
+
+def _verify_auth_token(token: str):
+    raw_token = str(token or "").strip()
+    if not raw_token or "." not in raw_token:
+        return None
+
+    encoded_payload, signature = raw_token.rsplit(".", 1)
+    try:
+        payload = unquote(encoded_payload)
+        expected_signature = _sign_payload(payload)
+        if not hmac.compare_digest(signature, expected_signature):
+            return None
+        data = json.loads(payload)
+        username = str(data.get("u", "")).strip().lower()
+        return username or None
+    except Exception:
+        return None
+
+
+def _apply_authenticated_state(username: str, token: str | None = None):
+    st.session_state[SESSION_AUTH_KEY] = True
+    st.session_state[SESSION_USER_KEY] = str(username or "").strip()
+    if token:
+        st.session_state[SESSION_TOKEN_KEY] = token
+    st.query_params[AUTH_QUERY_PARAM] = token or _build_auth_token(username)
+
+
 def logout():
     st.session_state[SESSION_AUTH_KEY] = False
     st.session_state[SESSION_USER_KEY] = ""
+    st.session_state.pop(SESSION_TOKEN_KEY, None)
+    try:
+        if AUTH_QUERY_PARAM in st.query_params:
+            del st.query_params[AUTH_QUERY_PARAM]
+    except Exception:
+        pass
+
+
+def hydrate_auth_from_query_params():
+    token = ""
+    try:
+        token = st.query_params.get(AUTH_QUERY_PARAM, "")
+        if isinstance(token, list):
+            token = token[0] if token else ""
+    except Exception:
+        token = ""
+
+    if st.session_state.get(SESSION_AUTH_KEY):
+        return True
+
+    username = _verify_auth_token(token)
+    if not username:
+        return False
+
+    admin_row = get_admin_by_email(username)
+    if not admin_row:
+        return False
+
+    _apply_authenticated_state(username, token=str(token))
+    return True
 
 
 def _get_admin_credentials_from_secrets():
@@ -47,12 +141,8 @@ def _check_credentials(input_user, input_pass):
     if not username or not password:
         return False
 
-    for admin_row in list_admin_rows():
-        correo = str((admin_row or {}).get("correo", "")).strip().lower()
-        if not correo:
-            continue
-        if not hmac.compare_digest(correo, username):
-            continue
+    admin_row = get_admin_by_email(username)
+    if admin_row:
         stored_password = (
             admin_row.get("contrasena")
             or admin_row.get("password")
@@ -81,26 +171,23 @@ def render_login():
     st.markdown(
         f"""
         <style>
-        /* Reset de fondos de Streamlit para ver el video */
         [data-testid="stAppViewContainer"], [data-testid="stHeader"], .main .block-container {{
             background: transparent !important;
         }}
-        
-        /* Contenedor del Video de fondo */
+
         .login-video-wrap {{
             position: fixed;
             inset: 0;
             z-index: -2;
             overflow: hidden;
         }}
-        
+
         .login-video-wrap video {{
             width: 100%;
             height: 100%;
             object-fit: cover;
         }}
 
-        /* Capa de filtro (Ligero filtro oscuro de antes) */
         .login-overlay {{
             content: "";
             position: fixed;
@@ -115,7 +202,6 @@ def render_login():
             padding-top: 10vh !important;
         }}
 
-        /* Tarjeta de Login (Glassmorphism) */
         [data-testid="stForm"] {{
             background: rgba(255, 255, 255, 0.05) !important;
             backdrop-filter: blur(20px) !important;
@@ -148,7 +234,6 @@ def render_login():
             margin-top: 0.5rem !important;
         }}
 
-        /* Inputs con estilo moderno */
         [data-testid="stTextInput"] label p {{
             color: #ffffff !important;
             font-family: 'Space Mono', monospace !important;
@@ -166,7 +251,6 @@ def render_login():
             padding: 0.75rem 1rem !important;
         }}
 
-        /* Botón de entrada */
         .stButton button {{
             background: transparent !important;
             color: #ffffff !important;
@@ -207,7 +291,7 @@ def render_login():
                     <p>Gestión de Asistencia y Personal</p>
                 </div>
                 """,
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
             username = st.text_input("Usuario / Correo", placeholder="admin@empresa.com")
             password = st.text_input("Contraseña", type="password", placeholder="••••••••")
@@ -221,8 +305,8 @@ def render_login():
                     return
 
                 if _check_credentials(username, password):
-                    st.session_state[SESSION_AUTH_KEY] = True
-                    st.session_state[SESSION_USER_KEY] = username.strip()
+                    auth_token = _build_auth_token(username)
+                    _apply_authenticated_state(username, auth_token)
                     st.success("Acceso correcto.")
                     st.rerun()
                     return
