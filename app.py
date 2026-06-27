@@ -17,6 +17,7 @@ except ImportError:
         tomllib = _TomlFallback()
 
 import streamlit as st
+import streamlit.components.v1 as components
 from cloudinary_uploader import upload_worker_file
 from login import hydrate_auth_from_query_params, is_authenticated, render_login, logout
 from sections.asistencias_resumen import render_resumen
@@ -1113,9 +1114,63 @@ def admin_page():
         .st-key-admin_background {
             z-index: -1 !important;
         }
+
+        html.admin-ready [data-testid="stVideo"],
+        html.admin-ready .login-transition-cover,
+        html.admin-ready .login-overlay,
+        html.admin-ready [data-testid="stHorizontalBlock"]:has(.login-logo) {
+            display: none !important;
+        }
+
+        html.admin-ready [data-testid="stSidebar"] {
+            display: flex !important;
+        }
         </style>
             """,
             unsafe_allow_html=True,
+        )
+        components.html(
+            """
+            <script>
+            (() => {
+                const parentDocument = window.parent.document;
+                const revealAdmin = () => {
+                    parentDocument.documentElement.classList.add("admin-ready");
+                };
+
+                const waitForBackground = () => {
+                    const image = parentDocument.querySelector(
+                        ".st-key-admin_background img"
+                    );
+                    if (!image) return false;
+
+                    if (image.complete && image.naturalWidth > 0) {
+                        requestAnimationFrame(revealAdmin);
+                    } else {
+                        image.addEventListener("load", revealAdmin, { once: true });
+                        image.addEventListener("error", revealAdmin, { once: true });
+                    }
+                    return true;
+                };
+
+                if (!waitForBackground()) {
+                    const observer = new MutationObserver(() => {
+                        if (waitForBackground()) observer.disconnect();
+                    });
+                    observer.observe(parentDocument.documentElement, {
+                        childList: true,
+                        subtree: true,
+                    });
+                    window.setTimeout(() => {
+                        observer.disconnect();
+                        revealAdmin();
+                    }, 2500);
+                }
+            })();
+            </script>
+            """,
+            height=0,
+            width=0,
         )
     
     st.markdown("""
@@ -1165,8 +1220,6 @@ def main():
         render_login()
         return
 
-    if login_placeholder is not None:
-        login_placeholder.empty()
 
 
 if __name__ == "__main__":

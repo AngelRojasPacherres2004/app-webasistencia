@@ -13,6 +13,7 @@ SESSION_AUTH_KEY = "admin_authenticated"
 SESSION_USER_KEY = "admin_username"
 SESSION_TOKEN_KEY = "admin_auth_token"
 LOGIN_VIDEO_PATH = Path("fondologin.mp4")
+ADMIN_BACKGROUND_PATH = Path("fondo.png")
 AUTH_QUERY_PARAM = "auth"
 
 
@@ -250,6 +251,17 @@ def _render_login_content():
             position: relative !important;
             z-index: 1102 !important;
         }
+
+        .st-key-admin_background_preload {
+            position: fixed !important;
+            width: 1px !important;
+            height: 1px !important;
+            left: -10px !important;
+            top: -10px !important;
+            overflow: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
         </style>
         <div class="login-transition-cover"></div>
         <div class="login-overlay"></div>
@@ -293,6 +305,7 @@ def _render_login_content():
             <script>
             (() => {
                 const parentDocument = window.parent.document;
+                parentDocument.documentElement.classList.remove("admin-ready");
 
                 const configureLoginVideo = () => {
                     const video = parentDocument.querySelector('[data-testid="stVideo"]');
@@ -351,6 +364,9 @@ def _render_login_content():
             muted=True,
             loop=True,
         )
+        if ADMIN_BACKGROUND_PATH.exists():
+            with st.container(key="admin_background_preload"):
+                st.image(str(ADMIN_BACKGROUND_PATH), width="stretch")
 
     st.markdown(
         f"""

@@ -23,6 +23,12 @@ html, body, .stApp, [data-testid="stApp"], [data-testid="stAppViewContainer"], .
     font-family: var(--sans) !important;
 }
 
+/* Evita el destello al 33% que Streamlit aplica al render anterior. */
+[data-testid="stElementContainer"] {
+    opacity: 1 !important;
+    transition: none !important;
+}
+
 /* Filtro blanco solo en admin - detrás del contenido */
 .admin-content-wrapper {
     position: fixed;
