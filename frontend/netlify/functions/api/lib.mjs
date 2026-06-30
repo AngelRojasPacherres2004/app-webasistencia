@@ -1,6 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import postgres from "postgres";
 
 const MONTHS = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -12,25 +12,17 @@ export const WEEKDAYS = [
 
 let client;
 export function db() {
-  const url = process.env.SUPABASE_URL?.trim();
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!url || !key) {
-    throw new Error("Faltan SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en Netlify.");
-  }
-  if (key.startsWith("sb_publishable_")) {
-    throw new Error(
-      "SUPABASE_SERVICE_ROLE_KEY contiene una clave pública. Usa la clave secreta sb_secret_... de Supabase.",
-    );
-  }
-  client ||= createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
+  const url = process.env.DATABASE_URL?.trim();
+  if (!url) throw new Error("Falta DATABASE_URL en las variables de Netlify.");
+  client ||= postgres(url, {
+    ssl: "require",
+    max: 1,
+    prepare: false,
+    connect_timeout: 15,
+    idle_timeout: 20,
+    max_lifetime: 60 * 5,
   });
   return client;
-}
-
-export function check(result, fallback = "Error de base de datos") {
-  if (result.error) throw new Error(`${fallback}: ${result.error.message}`);
-  return result.data ?? [];
 }
 
 const bool = (value) =>
@@ -141,20 +133,17 @@ function serializeAttendance(row) {
 }
 
 export async function loadDashboard(includeAttendances = true) {
-  const requests = [
-    db().from("tienda").select("*").order("nombre"),
-    db().from("trabajador").select("*").order("nombre"),
-    db().from("horario_trabajador").select("*").order("dni_trabajador").order("dia_semana"),
-  ];
-  if (includeAttendances) {
-    requests.push(
-      db().from("v_asistencia_resumen").select("*").order("fecha", { ascending: false }).order("id_asistencia", { ascending: false }),
-    );
-  }
-  const results = await Promise.all(requests);
-  const stores = check(results[0], "No se pudieron consultar las tiendas").map(serializeStore);
+  const sql = db();
+  const storeRows = await sql`SELECT * FROM public.tienda ORDER BY nombre`;
+  const workerRows = await sql`SELECT * FROM public.trabajador ORDER BY nombre`;
+  const rawSchedules = await sql`
+    SELECT * FROM public.horario_trabajador ORDER BY dni_trabajador, dia_semana
+  `;
+  const attendanceRows = includeAttendances
+    ? await sql`SELECT * FROM public.v_asistencia_resumen ORDER BY fecha DESC, id_asistencia DESC`
+    : [];
+  const stores = storeRows.map(serializeStore);
   const storesById = new Map(stores.map((item) => [item.id_tienda, item]));
-  const rawSchedules = check(results[2], "No se pudieron consultar los horarios");
   const scheduleMap = {};
   for (const row of rawSchedules) {
     const dni = String(row.dni_trabajador ?? "");
@@ -166,7 +155,7 @@ export async function loadDashboard(includeAttendances = true) {
       horario_salida: formatTime(row.horario_salida),
     };
   }
-  const workers = check(results[1], "No se pudieron consultar los trabajadores")
+  const workers = workerRows
     .map((row) => serializeWorker(row, storesById, scheduleMap));
   const workersByDni = new Map(workers.map((item) => [item.dni, item]));
   const schedules = rawSchedules.map((row) => {
@@ -184,7 +173,7 @@ export async function loadDashboard(includeAttendances = true) {
     };
   });
   const attendances = includeAttendances
-    ? check(results[3], "No se pudieron consultar las asistencias").map(serializeAttendance)
+    ? attendanceRows.map(serializeAttendance)
     : [];
   for (const attendance of attendances) {
     const worker = workersByDni.get(attendance.dni);
@@ -247,7 +236,7 @@ export function attendancePeriod(dashboard, filters) {
 }
 
 function tokenSecret() {
-  return process.env.AUTH_SECRET?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY || "cambia-esta-clave";
+  return process.env.AUTH_SECRET?.trim() || process.env.DATABASE_URL || "cambia-esta-clave";
 }
 
 const b64url = (input) => Buffer.from(input).toString("base64url");
@@ -277,8 +266,8 @@ export function verifyToken(request) {
 }
 
 export async function checkCredentials(username, password) {
-  const result = await db().from("administrador").select("*").eq("correo", username).limit(1);
-  const admin = check(result, "No se pudo validar el administrador")[0];
+  const sql = db();
+  const [admin] = await sql`SELECT * FROM public.administrador WHERE correo = ${username} LIMIT 1`;
   if (admin) {
     const stored = admin.contrasena || admin.password || admin["contraseña"] || admin.clave || "";
     if (String(stored).startsWith("$2")) {
@@ -309,8 +298,7 @@ export async function saveWorker(dni, payload, creating) {
     estado: payload.estado ?? true,
   };
   if (String(payload.password || "").trim()) data.contrasena = String(payload.password).trim();
-  check(await db().from("trabajador").upsert(data, { onConflict: "dni" }), "No se pudo guardar el trabajador");
-  check(await db().from("horario_trabajador").delete().eq("dni_trabajador", dni), "No se pudo actualizar el horario");
+  const sql = db();
   const schedules = payload.schedules.map((item) => ({
     dni_trabajador: dni,
     dia_semana: item.dia_semana,
@@ -319,26 +307,59 @@ export async function saveWorker(dni, payload, creating) {
     horario_fin_receso: item.horario_fin_receso || "00:00",
     horario_salida: item.horario_salida || "00:00",
   }));
-  check(await db().from("horario_trabajador").insert(schedules), "No se pudo guardar el horario");
+  await sql.begin(async (tx) => {
+    if (data.contrasena !== undefined) {
+      await tx`
+        INSERT INTO public.trabajador ${tx(data)}
+        ON CONFLICT (dni) DO UPDATE SET
+          id_tienda = EXCLUDED.id_tienda,
+          correo = EXCLUDED.correo,
+          nombre = EXCLUDED.nombre,
+          cargo = EXCLUDED.cargo,
+          sueldo = EXCLUDED.sueldo,
+          telefono = EXCLUDED.telefono,
+          csi = EXCLUDED.csi,
+          foto_dni = EXCLUDED.foto_dni,
+          estado = EXCLUDED.estado,
+          contrasena = EXCLUDED.contrasena
+      `;
+    } else {
+      await tx`
+        INSERT INTO public.trabajador ${tx(data)}
+        ON CONFLICT (dni) DO UPDATE SET
+          id_tienda = EXCLUDED.id_tienda,
+          correo = EXCLUDED.correo,
+          nombre = EXCLUDED.nombre,
+          cargo = EXCLUDED.cargo,
+          sueldo = EXCLUDED.sueldo,
+          telefono = EXCLUDED.telefono,
+          csi = EXCLUDED.csi,
+          foto_dni = EXCLUDED.foto_dni,
+          estado = EXCLUDED.estado
+      `;
+    }
+    await tx`DELETE FROM public.horario_trabajador WHERE dni_trabajador = ${dni}`;
+    await tx`INSERT INTO public.horario_trabajador ${tx(schedules)}`;
+  });
 }
 
 export async function listMarks(start, end, storeId, workerDni) {
+  const sql = db();
   const endExclusive = localDate(end);
   endExclusive.setDate(endExclusive.getDate() + 1);
-  let request = db().from("asistencia_multiple").select(
-    "id,id_tienda,id_trabajador,hora_marca,ubicacion,tipo",
-  ).gte("hora_marca", `${start}T05:00:00.000Z`)
-    .lt("hora_marca", `${isoDate(endExclusive)}T05:00:00.000Z`)
-    .order("hora_marca", { ascending: false });
-  if (storeId) request = request.eq("id_tienda", storeId);
-  if (workerDni) request = request.eq("id_trabajador", workerDni);
-  const marks = check(await request, "No se pudieron consultar las marcas");
-  const [storesResult, workersResult] = await Promise.all([
-    db().from("tienda").select("id_tienda,nombre,direccion"),
-    db().from("trabajador").select("dni,nombre"),
-  ]);
-  const stores = new Map(check(storesResult).map((row) => [String(row.id_tienda), row]));
-  const workers = new Map(check(workersResult).map((row) => [String(row.dni), row]));
+  const marks = await sql`
+    SELECT
+      am.id, am.id_tienda, am.id_trabajador, am.hora_marca,
+      am.ubicacion, am.tipo,
+      t.nombre AS nombre_tienda, t.direccion AS direccion_tienda,
+      tr.nombre AS nombre_trabajador
+    FROM public.asistencia_multiple am
+    LEFT JOIN public.tienda t ON t.id_tienda::text = am.id_tienda::text
+    LEFT JOIN public.trabajador tr ON tr.dni = am.id_trabajador
+    WHERE am.hora_marca >= ${`${start}T05:00:00.000Z`}::timestamptz
+      AND am.hora_marca < ${`${isoDate(endExclusive)}T05:00:00.000Z`}::timestamptz
+    ORDER BY am.hora_marca DESC
+  `;
   return marks.map((row) => {
     const date = new Date(row.hora_marca);
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -347,16 +368,104 @@ export async function listMarks(start, end, storeId, workerDni) {
     }).formatToParts(date).reduce((acc, item) => ({ ...acc, [item.type]: item.value }), {});
     return {
       id: row.id, id_tienda: row.id_tienda,
-      nombre_tienda: stores.get(String(row.id_tienda))?.nombre || "",
-      direccion_tienda: stores.get(String(row.id_tienda))?.direccion || "",
+      nombre_tienda: row.nombre_tienda || "",
+      direccion_tienda: row.direccion_tienda || "",
       id_trabajador: row.id_trabajador,
-      nombre_trabajador: workers.get(String(row.id_trabajador))?.nombre || "",
+      nombre_trabajador: row.nombre_trabajador || "",
       hora_marca: row.hora_marca,
       fecha_local: `${parts.year}-${parts.month}-${parts.day}`,
       hora_local: `${parts.hour}:${parts.minute}:${parts.second}`,
       ubicacion: row.ubicacion, tipo: row.tipo,
     };
+  }).filter((row) =>
+    (!storeId || String(row.id_tienda) === String(storeId)) &&
+    (!workerDni || String(row.id_trabajador) === String(workerDni)));
+}
+
+export async function createStoreRecord(id, token, payload) {
+  const sql = db();
+  await sql.begin(async (tx) => {
+    await tx`
+      INSERT INTO public.tienda
+        (id_tienda, correo, contrasena, nombre, telefono, direccion, fecha_apertura, estado)
+      VALUES
+        (${id}, ${payload.correo}, ${payload.contrasena}, ${payload.nombre},
+         ${payload.telefono}, ${payload.direccion}, ${payload.fecha_apertura}, true)
+    `;
+    await tx`
+      INSERT INTO public.qr (id_tienda, token, fecha_creada)
+      VALUES (${id}, ${token}, ${new Date()})
+    `;
   });
+}
+
+export async function updateStoreRecord(id, payload) {
+  const sql = db();
+  if (payload.contrasena !== undefined) {
+    await sql`
+      UPDATE public.tienda SET
+        correo=${payload.correo}, nombre=${payload.nombre}, telefono=${payload.telefono},
+        direccion=${payload.direccion}, fecha_apertura=${payload.fecha_apertura},
+        estado=${payload.estado}, contrasena=${payload.contrasena}
+      WHERE id_tienda=${id}
+    `;
+  } else {
+    await sql`
+      UPDATE public.tienda SET
+        correo=${payload.correo}, nombre=${payload.nombre}, telefono=${payload.telefono},
+        direccion=${payload.direccion}, fecha_apertura=${payload.fecha_apertura},
+        estado=${payload.estado}
+      WHERE id_tienda=${id}
+    `;
+  }
+}
+
+export async function setStatus(table, key, id, estado) {
+  const sql = db();
+  if (table === "tienda" && key === "id_tienda") {
+    await sql`UPDATE public.tienda SET estado=${estado} WHERE id_tienda=${id}`;
+  } else if (table === "trabajador" && key === "dni") {
+    await sql`UPDATE public.trabajador SET estado=${estado} WHERE dni=${id}`;
+  } else {
+    throw new Error("Actualización no permitida.");
+  }
+}
+
+export async function justifyAttendance(id) {
+  await db()`UPDATE public.asistencia SET justificado=true WHERE id_asistencia=${id}`;
+}
+
+export async function listEmailConfigs() {
+  return db()`SELECT * FROM public.alerta_puntualidad_config ORDER BY tipo_reporte, hora_envio`;
+}
+
+export async function saveEmailConfig(payload, id) {
+  let time = String(payload.hora_envio || "").trim();
+  if (time.length === 5) time += ":00";
+  const sql = db();
+  await sql`
+    INSERT INTO public.alerta_puntualidad_config
+      (id_config, id_tienda, correo_destino, minutos_tolerancia, activo,
+       tipo_reporte, nombre_reporte, hora_envio, ventana_minutos)
+    VALUES
+      (${id}, ${payload.id_tienda || null}, ${String(payload.correo_destino || "").trim()},
+       ${Number(payload.minutos_tolerancia || 0)}, true,
+       ${payload.id_tienda ? "TIENDA" : "GENERAL"},
+       ${String(payload.nombre_reporte || "Reporte mañana")}, ${time},
+       ${Number(payload.ventana_minutos || 5)})
+    ON CONFLICT (id_config) DO UPDATE SET
+      id_tienda=EXCLUDED.id_tienda,
+      correo_destino=EXCLUDED.correo_destino,
+      minutos_tolerancia=EXCLUDED.minutos_tolerancia,
+      tipo_reporte=EXCLUDED.tipo_reporte,
+      nombre_reporte=EXCLUDED.nombre_reporte,
+      hora_envio=EXCLUDED.hora_envio,
+      ventana_minutos=EXCLUDED.ventana_minutos
+  `;
+}
+
+export async function deleteEmailConfig(id) {
+  await db()`DELETE FROM public.alerta_puntualidad_config WHERE id_config=${id}`;
 }
 
 const hoursInSchedule = (schedule) => {

@@ -1,7 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
-  ApiError, attendancePeriod, check, checkCredentials, createToken, db,
-  isoDate, listMarks, loadDashboard, salarySummary, saveWorker, verifyToken,
+  ApiError, attendancePeriod, checkCredentials, createStoreRecord, createToken,
+  deleteEmailConfig, isoDate, justifyAttendance, listEmailConfigs, listMarks,
+  loadDashboard, salarySummary, saveEmailConfig, saveWorker, setStatus,
+  updateStoreRecord, verifyToken,
 } from "./lib.mjs";
 import {
   attendanceExcel, attendancePdf, marksExcel, workersPdf,
@@ -122,24 +124,14 @@ async function route(request) {
     requiredPassword(payload.password, true);
     const id = randomUUID();
     const token = randomBytes(16).toString("hex");
-    check(await db().from("tienda").insert({
-      id_tienda: id,
+    await createStoreRecord(id, token, {
       correo: String(payload.correo).trim().toLowerCase(),
       contrasena: String(payload.password),
       nombre: String(payload.nombre).trim(),
       telefono: String(payload.telefono || "").trim(),
       direccion: String(payload.direccion || "").trim(),
       fecha_apertura: payload.fecha_apertura || null,
-      estado: true,
-    }), "No se pudo registrar la tienda");
-    try {
-      check(await db().from("qr").insert({
-        id_tienda: id, token, fecha_creada: new Date().toISOString(),
-      }), "No se pudo crear el QR");
-    } catch (error) {
-      await db().from("tienda").delete().eq("id_tienda", id);
-      throw error;
-    }
+    });
     return json({ id_tienda: id, qr_token: token });
   }
 
@@ -160,12 +152,12 @@ async function route(request) {
       estado: payload.estado ?? true,
     };
     if (String(payload.password || "").trim()) data.contrasena = String(payload.password).trim();
-    check(await db().from("tienda").update(data).eq("id_tienda", decodeURIComponent(storeMatch[1])), "No se pudo guardar la tienda");
+    await updateStoreRecord(decodeURIComponent(storeMatch[1]), data);
     return json({ ok: true });
   }
   if (storeStatus && method === "PATCH") {
     const payload = await body(request);
-    check(await db().from("tienda").update({ estado: Boolean(payload.estado) }).eq("id_tienda", decodeURIComponent(storeStatus[1])), "No se pudo actualizar la tienda");
+    await setStatus("tienda", "id_tienda", decodeURIComponent(storeStatus[1]), Boolean(payload.estado));
     return json({ ok: true });
   }
 
@@ -193,7 +185,7 @@ async function route(request) {
   }
   if (workerStatus && method === "PATCH") {
     const payload = await body(request);
-    check(await db().from("trabajador").update({ estado: Boolean(payload.estado) }).eq("dni", decodeURIComponent(workerStatus[1])), "No se pudo actualizar el trabajador");
+    await setStatus("trabajador", "dni", decodeURIComponent(workerStatus[1]), Boolean(payload.estado));
     return json({ ok: true });
   }
   if (path === "/api/workers/export.pdf" && method === "GET") {
@@ -211,7 +203,7 @@ async function route(request) {
   if (path === "/api/attendance" && method === "GET") return json(await attendanceResult(url));
   const justify = path.match(/^\/api\/attendance\/([^/]+)\/justify$/);
   if (justify && method === "PATCH") {
-    check(await db().from("asistencia").update({ justificado: true }).eq("id_asistencia", decodeURIComponent(justify[1])), "No se pudo justificar la asistencia");
+    await justifyAttendance(decodeURIComponent(justify[1]));
     return json({ ok: true });
   }
   const exportAttendance = path.match(/^\/api\/attendance\/export\.(xlsx|pdf)$/);
@@ -232,22 +224,22 @@ async function route(request) {
   }
 
   if (path === "/api/email-configs" && method === "GET") {
-    return json(check(await db().from("alerta_puntualidad_config").select("*").order("tipo_reporte").order("hora_envio"), "No se pudo consultar la configuración"));
+    return json(await listEmailConfigs());
   }
   if (path === "/api/email-configs" && method === "POST") {
     const payload = await body(request);
     if (!String(payload.correo_destino || "").trim() || !String(payload.hora_envio || "").trim()) throw new ApiError(422, "Correo y hora de envío son obligatorios.");
     const id = randomUUID();
-    await saveEmail(payload, id);
+    await saveEmailConfig(payload, id);
     return json({ id_config: id });
   }
   const emailMatch = path.match(/^\/api\/email-configs\/([^/]+)$/);
   if (emailMatch && method === "PUT") {
-    await saveEmail(await body(request), decodeURIComponent(emailMatch[1]));
+    await saveEmailConfig(await body(request), decodeURIComponent(emailMatch[1]));
     return json({ ok: true });
   }
   if (emailMatch && method === "DELETE") {
-    check(await db().from("alerta_puntualidad_config").delete().eq("id_config", decodeURIComponent(emailMatch[1])), "No se pudo eliminar la configuración");
+    await deleteEmailConfig(decodeURIComponent(emailMatch[1]));
     return json({ ok: true });
   }
 
@@ -263,22 +255,6 @@ async function route(request) {
   }
 
   throw new ApiError(404, "Ruta no encontrada.");
-}
-
-async function saveEmail(payload, id) {
-  let time = String(payload.hora_envio || "").trim();
-  if (time.length === 5) time += ":00";
-  check(await db().from("alerta_puntualidad_config").upsert({
-    id_config: id,
-    id_tienda: payload.id_tienda || null,
-    correo_destino: String(payload.correo_destino || "").trim(),
-    minutos_tolerancia: Number(payload.minutos_tolerancia || 0),
-    activo: true,
-    tipo_reporte: payload.id_tienda ? "TIENDA" : "GENERAL",
-    nombre_reporte: String(payload.nombre_reporte || "Reporte mañana"),
-    hora_envio: time,
-    ventana_minutos: Number(payload.ventana_minutos || 5),
-  }, { onConflict: "id_config" }), "No se pudo guardar la configuración");
 }
 
 export default async (request) => {
