@@ -2,6 +2,7 @@
 from pathlib import Path
 from uuid import uuid4
 import hashlib
+import os
 import time as time_module
 import re
 
@@ -19,13 +20,11 @@ except ImportError:
         tomllib = _TomlFallback()
 
 import requests
-import streamlit as st
+
+from config.db import load_env
 
 
-CLOUDINARY_SECRET_PATHS = (
-    Path(".streamlit/secrets.toml"),
-    Path(".streamlit/secret.toml"),
-)
+CLOUDINARY_SECRET_PATHS = (Path(".secrets.toml"),)
 
 
 def _hard_clean(val):
@@ -41,11 +40,18 @@ def _hard_clean(val):
 
 
 def get_cloudinary_config():
-    try:
-        if "cloudinary" in st.secrets:
-            return _build_config(st.secrets["cloudinary"])
-    except Exception:
-        pass
+    load_env()
+    environment_config = {
+        "cloud_name": os.getenv("CLOUDINARY_CLOUD_NAME", ""),
+        "api_key": os.getenv("CLOUDINARY_API_KEY", ""),
+        "api_secret": os.getenv("CLOUDINARY_API_SECRET", ""),
+        "folder": os.getenv("CLOUDINARY_FOLDER", "trabajadores_dni"),
+    }
+    if all(
+        environment_config[key]
+        for key in ("cloud_name", "api_key", "api_secret")
+    ):
+        return _build_config(environment_config)
 
     for secret_path in CLOUDINARY_SECRET_PATHS:
         config = _load_file(secret_path)
@@ -53,8 +59,8 @@ def get_cloudinary_config():
             return _build_config(config)
 
     raise RuntimeError(
-        "Faltan credenciales de Cloudinary. Coloca `[cloudinary]` en "
-        "`.streamlit/secrets.toml` con `cloud_name`, `api_key` y `api_secret`."
+        "Faltan credenciales de Cloudinary. Configura CLOUDINARY_CLOUD_NAME, "
+        "CLOUDINARY_API_KEY y CLOUDINARY_API_SECRET en `.env`."
     )
 
 
@@ -126,7 +132,7 @@ def _build_signature(params: dict, api_secret: str) -> str:
     return hashlib.sha1(to_sign.encode("utf-8")).hexdigest()
 
 
-def upload_worker_file(uploaded_file, worker_id):
+def upload_worker_file(file_bytes: bytes, file_name: str, worker_id: str):
     config = get_cloudinary_config()
 
     cloud_name = config["cloud_name"]
@@ -144,15 +150,6 @@ def upload_worker_file(uploaded_file, worker_id):
     }
 
     signature = _build_signature(sign_params, api_secret)
-
-    # --- DEBUG: muestra en pantalla el string firmado y la firma ---
-    # Descomenta estas líneas si vuelve a fallar para ver qué está pasando:
-    # st.info(f"String to sign: folder={folder}&public_id={public_id}&timestamp={timestamp}{api_secret[:4]}***")
-    # st.info(f"Signature: {signature}")
-    # st.info(f"api_key len={len(api_key)}, api_secret len={len(api_secret)}")
-
-    file_bytes = uploaded_file.getvalue()
-    file_name  = uploaded_file.name
 
     upload_url = f"https://api.cloudinary.com/v1_1/{cloud_name}/auto/upload"
 

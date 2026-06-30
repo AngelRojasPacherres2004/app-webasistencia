@@ -1,1227 +1,544 @@
-﻿from pathlib import Path
-from uuid import uuid4
-from datetime import date, datetime, time
-from types import SimpleNamespace
-from zoneinfo import ZoneInfo
-try:
-    import tomllib
-except ImportError:
-    try:
-        import tomli as tomllib
-    except ImportError:
-        import toml as _toml
-        class _TomlFallback:
-            @staticmethod
-            def loads(content):
-                return _toml.loads(content)
-        tomllib = _TomlFallback()
+from __future__ import annotations
 
-import streamlit as st
-import streamlit.components.v1 as components
+import os
+import re
+from datetime import date
+from io import BytesIO
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import Body, FastAPI, HTTPException, Query, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+
+from backend.auth import AdminUser, check_credentials, create_token
+from backend.data import (
+    attendance_period,
+    fortnight_bounds,
+    load_dashboard,
+    month_bounds,
+    parse_date,
+    salary_summary,
+)
+from backend.database import (
+    delete_email_config,
+    list_email_configs,
+    list_marks,
+    replace_worker_schedule,
+    save_email_config,
+)
+from backend.exports import (
+    attendance_excel,
+    attendance_pdf,
+    marks_excel,
+    workers_pdf,
+)
 from cloudinary_uploader import upload_worker_file
-from login import hydrate_auth_from_query_params, is_authenticated, render_login, logout
-from sections.asistencias_resumen import render_resumen
-from sections.salarios import render_salarios
-from sections.tiendas import render_tiendas
-from sections.trabajadores import render_trabajadores
-from sections.correo_resend import render_correo
-from sections.asistencias_multiples import render_asistencias_multiples
 from supabase_backend import (
-    create_store_with_qr as backend_create_store_with_qr,
-    document_exists as backend_document_exists,
-    delete_document,
-    fetch_row_sets,
-    fetch_rows,
+    create_store_with_qr,
     hash_password,
-    server_timestamp,
     update_document,
     upsert_document,
 )
-st.set_page_config(
-    page_title="Admin · Asistencia",
-    page_icon="⬡",
-    layout="wide",
-    initial_sidebar_state="expanded",
+
+
+ROOT = Path(__file__).resolve().parent
+DIST = ROOT / "frontend" / "dist"
+PASSWORD_PATTERN = re.compile(r"^[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};:'\",.<>/?\\|`~]+$")
+
+app = FastAPI(title="Panel de Asistencia API", version="2.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-BACKGROUND_IMAGE_PATH = Path("fondo.png")
 
-# ?? Tema visual ????????????????????????????????????????????????????????????????
+def api_error(exc: Exception, fallback: str) -> HTTPException:
+    if isinstance(exc, HTTPException):
+        return exc
+    return HTTPException(status_code=400, detail=f"{fallback}: {exc}")
 
-def apply_global_css():
-    css_path = Path("styles/global.css")
-    if not css_path.exists():
+
+def valid_password(password: str, required: bool = False) -> None:
+    password = str(password or "").strip()
+    if not password and not required:
         return
-    st.markdown(f"<style>{css_path.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+    if len(password) < 3:
+        raise HTTPException(
+            status_code=422,
+            detail="La contraseña debe tener al menos 3 caracteres.",
+        )
+    if not PASSWORD_PATTERN.fullmatch(password):
+        raise HTTPException(
+            status_code=422,
+            detail="La contraseña no puede contener espacios.",
+        )
 
 
-apply_global_css()
+def attachment(data: bytes, media_type: str, filename: str) -> Response:
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
-
-# ── Constantes ─────────────────────────────────────────────────────────────────
-WORKER_COLLECTION = "trabajador"
-STORE_COLLECTION = "tienda"
-ATTENDANCE_COLLECTION = "asistencia"
-ATTENDANCE_RESUME_VIEW = "v_asistencia_resumen"
-QR_ACTIVE_COLLECTION = "qr"
-MONTH_NAMES = (
-    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-)
-WEEK_DAYS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado")
-WEEKDAY_NAMES = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
-SCHEDULE_FIELDS = ("hora_inicio", "inicio_receso", "final_receso", "hora_final")
-HIDDEN_FIELDS = ("password", "contrasena", "contraseña")
-SECRET_JSON_PATHS = (
-    Path(".streamlit/secrets.toml"),
-    Path(".streamlit/secret.toml"),
-)
-PERU_TIMEZONE = ZoneInfo("America/Lima")
-DATA_CACHE_KEYS = {
-    "stores": "cache_v_stores",
-    "workers": "cache_v_workers",
-    "schedules": "cache_v_schedules",
-    "attendances": "cache_v_attendances",
-    "attendance_resume": "cache_v_attendance_resume",
-    "admins": "cache_v_admins",
-}
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Error interno: {exc}"},
+    )
 
 
-def clean_service_account(service_account):
-    """Limpia y valida el diccionario de la cuenta de servicio."""
-    if not service_account or not isinstance(service_account, dict):
-        return service_account
-    
-    # Asegura que la llave privada no tenga espacios extra y procese bien los saltos de línea
-    if "private_key" in service_account and isinstance(service_account["private_key"], str):
-        key = service_account["private_key"]
-        # Limpiar comillas accidentales y espacios (común al pegar desde JSON a Streamlit Secrets)
-        key = key.strip().strip('"').strip("'").strip()
-        # Convertir representaciones literales de \n en saltos de línea reales
-        key = key.replace("\\n", "\n")
-        # Forzar el inicio en el marcador de apertura
-        if "-----BEGIN" in key:
-            key = "-----BEGIN" + key.split("-----BEGIN")[-1]
-        # Forzar el fin en el marcador de cierre (esto elimina el carácter 61 "=" inválido si hay basura después)
-        if "-----END PRIVATE KEY-----" in key:
-            key = key.split("-----END PRIVATE KEY-----")[0] + "-----END PRIVATE KEY-----"
-        service_account["private_key"] = key.strip()
-    
-    return service_account
+@app.get("/api/health")
+def health():
+    return {"ok": True, "frontend_built": DIST.exists()}
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-def normalize_doc_id(value):
-    normalized = str(value or "").strip().lower()
-    safe_value = "".join(
-        character if character.isalnum() else "_" for character in normalized
-    ).strip("_")
-    return safe_value or uuid4().hex
+@app.post("/api/auth/login")
+def login(payload: dict = Body(...)):
+    username = str(payload.get("username") or "").strip().lower()
+    password = str(payload.get("password") or "")
+    if not username or not password:
+        raise HTTPException(
+            status_code=422, detail="Completa el usuario y la contraseña."
+        )
+    if not check_credentials(username, password):
+        raise HTTPException(
+            status_code=401, detail="Usuario o contraseña incorrectos."
+        )
+    return {"token": create_token(username), "user": username}
 
 
-def normalize_email(email):
-    return str(email or "").strip().lower()
+@app.get("/api/auth/me")
+def current_user(admin: AdminUser):
+    return {"user": admin}
 
 
-def _as_bool_value(value):
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "sí"}
+@app.get("/api/stores")
+def stores(_admin: AdminUser):
+    return load_dashboard(include_attendances=False)["stores"]
 
 
-def format_time(value):
-    if value is None or value == "" or value is False:
-        return ""
-    if isinstance(value, str):
-        text = value.strip()
-        if "T" in text:
-            try:
-                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-                if parsed.tzinfo is not None:
-                    parsed = parsed.astimezone(PERU_TIMEZONE)
-                return parsed.strftime("%H:%M")
-            except ValueError:
-                pass
-        return text[:5] if len(text) >= 5 and text[2] == ":" else text
-    if isinstance(value, datetime):
-        if value.tzinfo is not None:
-            value = value.astimezone(PERU_TIMEZONE)
-        return value.strftime("%H:%M")
-    return value.strftime("%H:%M")
-
-
-def parse_iso_date(value):
-    try:
-        return date.fromisoformat(str(value or ""))
-    except ValueError:
-        return None
-
-
-def add_months(month_value, delta):
-    month_index = month_value.month - 1 + delta
-    year = month_value.year + month_index // 12
-    month = month_index % 12 + 1
-    return date(year, month, 1)
-
-
-def format_month(month_value):
-    return f"{MONTH_NAMES[month_value.month - 1]} {month_value.year}"
-
-
-def first_present(data, *keys):
-    for key in keys:
-        value = data.get(key)
-        if value not in (None, ""):
-            return value
-    return ""
-
-
-def map_value(data, map_key, value_key):
-    value = data.get(map_key)
-    if isinstance(value, dict):
-        return value.get(value_key) or ""
-    return ""
-
-
-def path_value_after(path_parts, collection_names):
-    normalized_names = {name.lower() for name in collection_names}
-    for index, part in enumerate(path_parts[:-1]):
-        if part.lower() in normalized_names:
-            return path_parts[index + 1]
-    return ""
-
-
-def build_attendance_row(doc, data=None):
-    if isinstance(doc, dict) and data is None:
-        data = doc
-    data = data or {}
-    fecha = str(data.get("fecha") or "")
-    parsed_date = parse_iso_date(fecha)
-    return {
-        "doc_id": str(data.get("id_asistencia") or data.get("doc_id") or "").strip(),
-        "ruta": str(data.get("id_asistencia") or data.get("doc_id") or "").strip(),
-        "fecha": fecha,
-        "fecha_orden": parsed_date.isoformat() if parsed_date else "",
-        "nombre_tienda": data.get("nombre_tienda", ""),
-        "id_tienda": data.get("id_tienda", ""),
-        "id_trabajador": data.get("dni_trabajador", ""),
-        "nombre_trabajador": data.get("nombre_trabajador", ""),
-        "dni": data.get("dni_trabajador", ""),
-        "hora_inicio": format_time(data.get("horario_entrada")),
-        "inicio_receso": format_time(data.get("horario_inicio_receso")),
-        "final_receso": format_time(data.get("horario_fin_receso")),
-        "hora_final": format_time(data.get("horario_salida")),
-        "justificado": _as_bool_value(data.get("justificado", data.get("JUSTIFICADO", False))),
-        "ultima_marca": (
-            "hora_final"
-            if data.get("horario_salida")
-            else "final_receso" if data.get("horario_fin_receso")
-            else "inicio_receso" if data.get("horario_inicio_receso")
-            else "hora_inicio" if data.get("horario_entrada")
-            else ""
-        ),
-        "id_sede": data.get("id_tienda", ""),
-        "nombre_sede": data.get("nombre_tienda", ""),
-        "horario_programado": "",
+@app.post("/api/stores")
+def create_store(_admin: AdminUser, payload: dict = Body(...)):
+    required = {
+        "nombre": payload.get("nombre"),
+        "correo": payload.get("correo"),
+        "contraseña": payload.get("password"),
     }
-
-
-@st.cache_resource(show_spinner=False)
-def get_database_client():
-    return get_connection()
-
-
-def load_service_account():
-    return {}
-
-
-def load_service_account_file(path):
-    return {}
-
-
-def required_missing(fields):
-    return [label for label, value in fields.items() if not str(value or "").strip()]
-
-
-def document_exists(collection_name, document_id):
-    return backend_document_exists(collection_name, document_id)
-
-
-def create_document(collection_name, document_id, data):
-    upsert_document(collection_name, document_id, data)
-    invalidate_collection_cache(collection_name)
-
-
-def create_store_with_qr(document_id, store_data):
-    qr_token = backend_create_store_with_qr(
-        STORE_COLLECTION,
-        QR_ACTIVE_COLLECTION,
-        document_id,
-        store_data,
-    )
-    invalidate_collection_cache(STORE_COLLECTION)
-    invalidate_collection_cache(QR_ACTIVE_COLLECTION)
-    return qr_token
-
-
-def _cache_version(key):
-    return int(st.session_state.get(key, 0))
-
-
-def _bump_cache_version(key):
-    st.session_state[key] = _cache_version(key) + 1
-
-
-def invalidate_collection_cache(collection_name):
-    collection = str(collection_name or "").strip().lower()
-    if collection == STORE_COLLECTION:
-        _bump_cache_version(DATA_CACHE_KEYS["stores"])
-        _bump_cache_version(DATA_CACHE_KEYS["workers"])
-        _bump_cache_version(DATA_CACHE_KEYS["schedules"])
-        _bump_cache_version(DATA_CACHE_KEYS["attendances"])
-        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
-    elif collection == WORKER_COLLECTION:
-        _bump_cache_version(DATA_CACHE_KEYS["workers"])
-        _bump_cache_version(DATA_CACHE_KEYS["schedules"])
-        _bump_cache_version(DATA_CACHE_KEYS["attendances"])
-        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
-    elif collection == "horario_trabajador":
-        _bump_cache_version(DATA_CACHE_KEYS["schedules"])
-        _bump_cache_version(DATA_CACHE_KEYS["workers"])
-        _bump_cache_version(DATA_CACHE_KEYS["attendances"])
-        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
-    elif collection == ATTENDANCE_COLLECTION:
-        _bump_cache_version(DATA_CACHE_KEYS["attendances"])
-        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
-    elif collection == ATTENDANCE_RESUME_VIEW:
-        _bump_cache_version(DATA_CACHE_KEYS["attendance_resume"])
-    elif collection == QR_ACTIVE_COLLECTION:
-        _bump_cache_version(DATA_CACHE_KEYS["stores"])
-    else:
-        st.cache_data.clear()
-
-
-# ── Queries cacheadas ──────────────────────────────────────────────────────────
-def _build_tiendas(docs):
-    tiendas = []
-    for data in docs:
-        tiendas.append({
-            "doc_id": data.get("id_tienda", ""),
-            "id_tienda": data.get("id_tienda", ""),
-            "correo": data.get("correo", ""),
-            "tiene_contrasena": bool(data.get("contrasena")),
-            "nombre_tienda": data.get("nombre", ""),
-            "id_sede": data.get("id_tienda", ""),
-            "nombre_sede": data.get("nombre", ""),
-            "direccion": data.get("direccion", ""),
-            "telefono": data.get("telefono", ""),
-            "fecha_apertura": data.get("fecha_apertura", ""),
-            "estado": data.get("estado", True),
-        })
-    return sorted(tiendas, key=lambda item: item["nombre_tienda"])
-
-
-def _build_trabajadores(docs, tiendas, horarios):
-    stores_by_id = {row["id_tienda"]: row for row in tiendas}
-    schedule_map = {}
-    for row in horarios:
-        schedule_map.setdefault(
-            row.get("dni_trabajador", ""), {}
-        )[row.get("dia_semana", "")] = row
-
-    trabajadores = []
-    for data in docs:
-        tienda = stores_by_id.get(data.get("id_tienda", ""), {})
-        horario = schedule_map.get(data.get("dni", ""), {})
-        trabajadores.append({
-            "doc_id": data.get("dni", ""),
-            "id_trabajador": data.get("dni", ""),
-            "correo": data.get("correo", ""),
-            "tiene_contrasena": bool(data.get("contrasena")),
-            "area": data.get("cargo", ""),
-            "sueldo": data.get("sueldo", ""),
-            "dni": data.get("dni", ""),
-            "id_sede": data.get("id_tienda", ""),
-            "nombre_sede": tienda.get("nombre_tienda", ""),
-            "nombre_trabajador": data.get("nombre", ""),
-            "cuenta_bancaria": "",
-            "csi": data.get("csi", ""),
-            "telefono": data.get("telefono", ""),
-            "foto_dni": data.get("foto_dni", ""),
-            "dias_horario": list(horario.keys()),
-            "dias_horario_texto": ", ".join(horario.keys()),
-            "horario": horario,
-            "estado": bool(data.get("estado", True)),
-        })
-    return sorted(trabajadores, key=lambda item: item["nombre_trabajador"])
-
-
-def _build_horarios(horarios, trabajadores, tiendas):
-    workers_by_dni = {row["dni"]: row for row in trabajadores}
-    stores_by_id = {row["id_tienda"]: row for row in tiendas}
-    rows = []
-    for item in horarios:
-        worker = workers_by_dni.get(item.get("dni_trabajador", ""), {})
-        tienda = stores_by_id.get(worker.get("id_sede", ""), {})
-        rows.append({
-            "dni_trabajador": item.get("dni_trabajador", ""),
-            "nombre_trabajador": worker.get("nombre_trabajador", ""),
-            "id_tienda": worker.get("id_sede", ""),
-            "nombre_tienda": tienda.get("nombre_tienda", ""),
-            "dia_semana": item.get("dia_semana", ""),
-            "horario_entrada": format_time(item.get("horario_entrada")),
-            "horario_inicio_receso": format_time(item.get("horario_inicio_receso")),
-            "horario_fin_receso": format_time(item.get("horario_fin_receso")),
-            "horario_salida": format_time(item.get("horario_salida")),
-        })
-    return rows
-
-
-def _build_asistencia_resumen(docs):
-    rows = []
-    for data in docs:
-        row = build_attendance_row(data, data)
-        row["nombre_trabajador"] = data.get(
-            "nombre_trabajador", row.get("nombre_trabajador", "")
-        )
-        row["nombre_tienda"] = data.get(
-            "nombre_tienda", row.get("nombre_tienda", "")
-        )
-        row["id_tienda"] = data.get("id_tienda", row.get("id_tienda", ""))
-        row["cargo"] = data.get("cargo", "")
-        rows.append(row)
-
-    unique_rows = {item["ruta"]: item for item in rows}
-    return sorted(
-        unique_rows.values(),
-        key=lambda item: item["fecha_orden"] or item["fecha"],
-        reverse=True,
-    )
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _get_tiendas_cached(cache_version):
-    docs = fetch_rows(STORE_COLLECTION, order_by=("nombre", False))
-    return _build_tiendas(docs)
-
-
-def get_tiendas():
-    return get_resumen_dashboard()[2]
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _get_trabajadores_cached(cache_version):
-    docs = fetch_rows(WORKER_COLLECTION, order_by=("nombre", False))
-    tiendas = get_tiendas()
-    horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
-    return _build_trabajadores(docs, tiendas, horarios)
-
-
-def get_trabajadores():
-    return get_resumen_dashboard()[1]
-
-
-@st.cache_data(ttl=60, show_spinner=False)
-def _get_horarios_trabajador_cached(cache_version):
-    horarios = fetch_rows("horario_trabajador", order_by=(("dni_trabajador", False), ("dia_semana", False)))
-    return _build_horarios(horarios, get_trabajadores(), get_tiendas())
-
-
-def get_horarios_trabajador():
-    return get_resumen_dashboard()[3]
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def _get_asistencias_cached(cache_version):
-    docs = fetch_rows(ATTENDANCE_COLLECTION, order_by=(("fecha", True), ("id_asistencia", True)))
-    trabajadores = {row["dni"]: row for row in get_trabajadores()}
-    tiendas = {row["id_tienda"]: row for row in get_tiendas()}
-    asistencias = []
-    for data in docs:
-        row = build_attendance_row(data, data)
-        worker = trabajadores.get(row.get("dni", ""), {})
-        if worker:
-            row["nombre_trabajador"] = worker.get("nombre_trabajador", "")
-            row["id_tienda"] = worker.get("id_sede", "")
-            row["nombre_sede"] = worker.get("nombre_sede", "")
-            tienda = tiendas.get(worker.get("id_sede", ""), {})
-            row["nombre_tienda"] = tienda.get("nombre_tienda", row.get("nombre_sede", ""))
-        asistencias.append(row)
-
-    unique_rows = {item["ruta"]: item for item in asistencias}
-    return sorted(
-        unique_rows.values(),
-        key=lambda item: item["fecha_orden"] or item["fecha"],
-        reverse=True,
-    )
-
-
-def get_asistencias():
-    return _get_asistencias_cached(_cache_version(DATA_CACHE_KEYS["attendances"]))
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def _get_asistencias_trabajador_cached(id_trabajador, cache_version):
-    docs = fetch_rows(
-        ATTENDANCE_COLLECTION,
-        filters=[("dni_trabajador", "eq", id_trabajador)],
-        order_by=(("fecha", True), ("id_asistencia", True)),
-    )
-    asistencias = [build_attendance_row(data, data) for data in docs]
-
-    unique_rows = {item["ruta"]: item for item in asistencias}
-    return sorted(unique_rows.values(), key=lambda x: x["fecha_orden"], reverse=True)
-
-
-def get_asistencias_trabajador(id_trabajador):
-    return _get_asistencias_trabajador_cached(
-        id_trabajador,
-        _cache_version(DATA_CACHE_KEYS["attendances"]),
-    )
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def _get_asistencia_resumen_cached(cache_version):
-    docs = fetch_rows(
-        ATTENDANCE_RESUME_VIEW,
-        order_by=(("fecha", True), ("id_asistencia", True)),
-    )
-    return _build_asistencia_resumen(docs)
-
-
-def get_asistencia_resumen():
-    return get_resumen_dashboard()[0]
-
-
-@st.cache_data(ttl=30, show_spinner=False)
-def _get_resumen_dashboard_cached(cache_versions):
-    row_sets = fetch_row_sets({
-        "asistencias": {
-            "table_name": ATTENDANCE_RESUME_VIEW,
-            "order_by": (("fecha", True), ("id_asistencia", True)),
-        },
-        "trabajadores": {
-            "table_name": WORKER_COLLECTION,
-            "order_by": ("nombre", False),
-        },
-        "tiendas": {
-            "table_name": STORE_COLLECTION,
-            "order_by": ("nombre", False),
-        },
-        "horarios": {
-            "table_name": "horario_trabajador",
-            "order_by": (("dni_trabajador", False), ("dia_semana", False)),
-        },
-    })
-    tiendas = _build_tiendas(row_sets["tiendas"])
-    trabajadores = _build_trabajadores(
-        row_sets["trabajadores"], tiendas, row_sets["horarios"]
-    )
-    horarios = _build_horarios(row_sets["horarios"], trabajadores, tiendas)
-    asistencias = _build_asistencia_resumen(row_sets["asistencias"])
-    return asistencias, trabajadores, tiendas, horarios
-
-
-def get_resumen_dashboard():
-    cache_versions = (
-        _cache_version(DATA_CACHE_KEYS["attendance_resume"]),
-        _cache_version(DATA_CACHE_KEYS["workers"]),
-        _cache_version(DATA_CACHE_KEYS["stores"]),
-        _cache_version(DATA_CACHE_KEYS["schedules"]),
-    )
-    return _get_resumen_dashboard_cached(cache_versions)
-
-
-# ── Componentes UI ─────────────────────────────────────────────────────────────
-def section_header(title, subtitle=None):
-    """Encabezado de sección con línea decorativa."""
-    st.markdown(f"""
-    <div style="margin: 0.5rem 0 1.5rem; padding-left: 0.75rem;
-                border-left: 3px solid var(--tertiary);">
-        <div style="font-family:'Space Mono',monospace; font-size:0.78rem;
-                    text-transform:uppercase; letter-spacing:0.1em; color:var(--text);
-                    margin-bottom:0.2rem;">{title}</div>
-        {'<div style="font-size:0.82rem; color:var(--muted); font-family:DM Sans,sans-serif;">'+subtitle+'</div>' if subtitle else ''}
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def badge(text, color="var(--text)"):
-    return f'<span style="background:var(--secondary);color:{color};border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-family:Space Mono,monospace;font-size:0.65rem;letter-spacing:0.06em;">{text}</span>'
-
-
-def _parse_time_value(value):
-    if not value:
-        return None
-    if isinstance(value, time):
-        return value
-    text = str(value).strip()
-    if not text:
-        return None
-    if " " in text:
-        text = text.split(" ", 1)[1]
-    if "T" in text:
-        text = text.split("T", 1)[-1]
-    try:
-        return time.fromisoformat(text[:8])
-    except ValueError:
-        return None
-
-
-def _time_select_options(step_minutes=15):
-    options = ["Sin registro"]
-    current_minutes = 0
-    while current_minutes < 24 * 60:
-        hour_value = current_minutes // 60
-        minute_value = current_minutes % 60
-        options.append(f"{hour_value:02d}:{minute_value:02d}")
-        current_minutes += step_minutes
-    return options
-
-
-def _time_select_index(current_value, options):
-    if not current_value:
-        return 0
-    normalized = format_time(current_value)[:5]
-    try:
-        return options.index(normalized)
-    except ValueError:
-        return 0
-
-
-def build_schedule_inputs(selected_days, key_prefix="schedule", initial_schedule=None):
-    if not selected_days:
-        return {}
-
-    st.markdown("""
-    <div style="font-family:'Space Mono',monospace; font-size:0.68rem;
-                text-transform:uppercase; letter-spacing:0.08em; color:var(--muted);
-                margin: 1.25rem 0 0.75rem; padding: 0.5rem 0;
-                border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
-        ⬡ &nbsp;Horario por día
-    </div>
-    """, unsafe_allow_html=True)
-
-    schedule = {}
-    header = st.columns([1.2, 1, 1, 1, 1])
-    for col, label in zip(header, ["Día", "Entrada", "Ini. receso", "Fin receso", "Salida"]):
-        col.markdown(f'<span style="font-family:Space Mono,monospace;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.07em;color:var(--muted);">{label}</span>', unsafe_allow_html=True)
-
-    for day in selected_days:
-        cols = st.columns([1.2, 1, 1, 1, 1])
-        cols[0].markdown(f'<span style="font-family:Space Mono,monospace;font-size:0.78rem;color:var(--text);">{day.capitalize()}</span>', unsafe_allow_html=True)
-        day_initial = (initial_schedule or {}).get(day, {})
-
-        time_options = _time_select_options()
-        inicio_receso_selection = cols[2].selectbox(
-            "Inicio receso",
-            options=time_options,
-            index=_time_select_index(
-                day_initial.get("horario_inicio_receso") or day_initial.get("inicio_receso"),
-                time_options,
-            ),
-            key=f"{key_prefix}_{day}_inicio_receso",
-            label_visibility="collapsed",
-        )
-        inicio_receso_value = None if inicio_receso_selection == "Sin registro" else inicio_receso_selection
-
-        fin_receso_selection = cols[3].selectbox(
-            "Fin receso",
-            options=time_options,
-            index=_time_select_index(
-                day_initial.get("horario_fin_receso") or day_initial.get("final_receso"),
-                time_options,
-            ),
-            key=f"{key_prefix}_{day}_fin_receso",
-            label_visibility="collapsed",
-        )
-        fin_receso_value = None if fin_receso_selection == "Sin registro" else fin_receso_selection
-
-        schedule[day] = {
-            "hora_inicio":    format_time(cols[1].time_input("Hora inicio",    value=_parse_time_value(day_initial.get("horario_entrada") or day_initial.get("hora_inicio")),    key=f"{key_prefix}_{day}_hora_inicio",    label_visibility="collapsed")),
-            "inicio_receso":  inicio_receso_value,
-            "final_receso":   fin_receso_value,
-            "hora_final":     format_time(cols[4].time_input("Hora final",     value=_parse_time_value(day_initial.get("horario_salida") or day_initial.get("hora_final")),     key=f"{key_prefix}_{day}_hora_final",     label_visibility="collapsed")),
-        }
-    return schedule
-
-
-def _combine_local_datetime(fecha_value, hora_value):
-    if not fecha_value or not hora_value:
-        return None
-    if isinstance(fecha_value, str):
-        fecha_obj = date.fromisoformat(fecha_value[:10])
-    else:
-        fecha_obj = fecha_value
-    if isinstance(hora_value, str):
-        hora_obj = time.fromisoformat(hora_value[:8])
-    else:
-        hora_obj = hora_value
-    combined = datetime.combine(fecha_obj, hora_obj)
-    return combined.replace(tzinfo=PERU_TIMEZONE).isoformat()
-
-
-def save_worker_with_schedule(worker_data, selected_days, schedule):
-    if isinstance(worker_data, str):
-        worker_data = {"dni": worker_data}
-    dni = worker_data["dni"]
-    upsert_document(WORKER_COLLECTION, dni, worker_data, key_field="dni")
-    from supabase_backend import delete_rows, insert_document
-
-    delete_rows("horario_trabajador", [("dni_trabajador", "eq", dni)])
-    for day in selected_days:
-        day_schedule = schedule.get(day, {})
-        insert_document("horario_trabajador", {
-            "dni_trabajador": dni,
-            "dia_semana": day,
-            "horario_entrada": day_schedule.get("hora_inicio") if day_schedule.get("hora_inicio") not in (None, "") else "00:00",
-            "horario_inicio_receso": day_schedule.get("inicio_receso") or None,
-            "horario_fin_receso": day_schedule.get("final_receso") or None,
-            "horario_salida": day_schedule.get("hora_final") if day_schedule.get("hora_final") not in (None, "") else "00:00",
-        })
-
-
-def save_attendance_record(attendance_data):
-    from supabase_backend import insert_document
-    insert_document(ATTENDANCE_COLLECTION, attendance_data)
-
-
-# ── Formularios ────────────────────────────────────────────────────────────────
-def tienda_form():
-    section_header("Nueva tienda", "Registra una tienda en el sistema")
-
-    try:
-        with st.form("create_store_form", clear_on_submit=True):
-            col_1, col_2 = st.columns(2)
-            nombre_tienda = col_1.text_input("Nombre tienda *", placeholder="Tienda Centro")
-            correo = col_1.text_input("Correo *", placeholder="tienda@empresa.com")
-            telefono = col_1.text_input("Teléfono", placeholder="+51 999 999 999")
-            direccion = col_2.text_input("Dirección", placeholder="Av. Principal 123")
-            fecha_apertura = col_2.date_input("Fecha apertura", value=None)
-
-            submitted = st.form_submit_button("⬡  Registrar tienda", use_container_width=True)
-
-        if not submitted:
-            return
-
-        missing = required_missing({
-            "Nombre tienda": nombre_tienda, "Correo": correo,
-        })
-        if missing:
-            st.error("Campos requeridos: " + ", ".join(missing))
-            return
-
-        doc_id = str(uuid4())
-
-        store_data = {
-            "correo": normalize_email(correo),
-            "nombre": nombre_tienda.strip(),
-            "telefono": telefono.strip(),
-            "direccion": direccion.strip(),
-            "fecha_apertura": fecha_apertura.isoformat() if fecha_apertura else None,
-            "estado": True,
-        }
-        qr_token = create_store_with_qr(doc_id, store_data)
-        st.success(f"✓  Tienda registrada → `{STORE_COLLECTION}/{doc_id}`")
-        st.caption(f"QR activo creado en `{QR_ACTIVE_COLLECTION}` - token `{qr_token}`")
-    except Exception as exc:
-        st.error(f"No se pudo registrar la tienda: {exc}")
-
-
-def trabajador_form():
-    section_header("Nuevo trabajador", "Crea el perfil y horario de un colaborador")
-    tiendas = get_tiendas()
-
-    success_message = st.session_state.pop("worker_success_message", None)
-    if success_message:
-        st.success(success_message)
-
-    if not tiendas:
-        st.warning("Primero registra al menos una tienda.")
-        return
-
-    tienda_options = {
-        f"{t['nombre_tienda']}  ·  {t['id_tienda']}": t for t in tiendas
-    }
-
-    form_seed = int(st.session_state.get("worker_form_seed", 0))
-    selected_days = st.multiselect(
-        "Días laborables *",
-        options=list(WEEK_DAYS),
-        default=list(WEEK_DAYS),
-        format_func=str.capitalize,
-        key=f"worker_days_{form_seed}",
-    )
-    if not selected_days:
-        st.warning("Selecciona al menos un día para el horario.")
-
-    try:
-        with st.form(f"create_worker_form_{form_seed}", clear_on_submit=False):
-            col_1, col_2 = st.columns(2)
-            dni = col_1.text_input("DNI *", placeholder="12345678", key=f"worker_dni_{form_seed}")
-            nombre = col_1.text_input("Nombre completo *", placeholder="Juan Pérez", key=f"worker_nombre_{form_seed}")
-            cargo = col_1.text_input("Cargo", placeholder="Ventas", key=f"worker_cargo_{form_seed}")
-            sueldo = col_1.number_input("Sueldo", min_value=0.0, step=50.0, format="%.2f", key=f"worker_sueldo_{form_seed}")
-            correo = col_2.text_input("Correo", placeholder="juan@empresa.com", key=f"worker_correo_{form_seed}")
-            telefono = col_2.text_input("Teléfono", placeholder="+51 999 999 999", key=f"worker_telefono_{form_seed}")
-            csi = col_2.text_input("CSI / código interno", placeholder="CSI-001", key=f"worker_csi_{form_seed}")
-            foto_dni = col_2.file_uploader(
-                "Foto DNI *",
-                type=["jpg", "jpeg", "png", "pdf"],
-                key=f"worker_foto_{form_seed}",
-            )
-            tienda_label      = st.selectbox(
-                "Tienda / sede asignada *",
-                options=list(tienda_options.keys()),
-                index=None,
-                placeholder="Selecciona una tienda",
-                key=f"worker_tienda_{form_seed}",
-            )
-            horario = build_schedule_inputs(selected_days, key_prefix=f"worker_{form_seed}")
-            submitted = st.form_submit_button("⬡  Registrar trabajador", use_container_width=True)
-
-        if not submitted:
-            return
-
-        missing = required_missing({
-            "DNI": dni, "Nombre": nombre, "Foto DNI": foto_dni,
-            "Tienda": tienda_label,
-        })
-        if not selected_days:
-            missing.append("Días laborables")
-
-        if missing:
-            st.error("Campos requeridos: " + ", ".join(missing))
-            return
-
-        doc_id = str(dni).strip()
-        if document_exists(WORKER_COLLECTION, doc_id):
-            st.error(f"Ya existe un trabajador con el ID `{doc_id}`.")
-            return
-
-        tienda = tienda_options[tienda_label]
-        uploaded_dni = upload_worker_file(foto_dni, doc_id)
-
-        worker_data = {
-            "dni": doc_id,
-            "id_tienda": tienda["id_tienda"],
-            "correo": normalize_email(correo),
-            "nombre": nombre.strip(),
-            "cargo": cargo.strip(),
-            "sueldo": float(sueldo) if sueldo is not None else None,
-            "telefono": telefono.strip(),
-            "csi": csi.strip(),
-            "foto_dni": uploaded_dni["secure_url"],
-            "estado": True,
-        }
-        create_document(WORKER_COLLECTION, doc_id, worker_data)
-        from supabase_backend import delete_rows, insert_document
-        delete_rows("horario_trabajador", [("dni_trabajador", "eq", doc_id)])
-        for day in selected_days:
-            schedule_item = horario.get(day, {})
-            insert_document("horario_trabajador", {
-                "dni_trabajador": doc_id,
-                "dia_semana": day,
-                "horario_entrada": schedule_item.get("hora_inicio") if schedule_item.get("hora_inicio") not in (None, "") else "00:00",
-                "horario_inicio_receso": schedule_item.get("inicio_receso") or None,
-                "horario_fin_receso": schedule_item.get("final_receso") or None,
-                "horario_salida": schedule_item.get("hora_final") if schedule_item.get("hora_final") not in (None, "") else "00:00",
-            })
-        st.session_state["worker_success_message"] = f"✓  Trabajador registrado → `{WORKER_COLLECTION}/{doc_id}`"
-        st.session_state["worker_form_seed"] = form_seed + 1
-        st.rerun()
-    except Exception as exc:
-        st.error(f"No se pudo registrar el trabajador: {exc}")
-
-
-def asistencia_form():
-    section_header("Nueva asistencia", "Registra o corrige una marca manualmente")
-    trabajadores = get_trabajadores()
-
-    if not trabajadores:
-        st.warning("Necesitas al menos un trabajador registrado.")
-        return
-
-    worker_options = {f"{w['nombre_trabajador']}  ·  {w['dni']}": w for w in trabajadores}
-
-    with st.form("create_attendance_form", clear_on_submit=True):
-        col_1, col_2 = st.columns(2)
-        worker_label  = col_1.selectbox("Trabajador *", options=list(worker_options.keys()), index=None, placeholder="Selecciona un trabajador")
-        fecha         = col_1.date_input("Fecha *")
-
-        st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
-        st.markdown('<span style="font-family:Space Mono,monospace;font-size:0.68rem;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;">⬡ &nbsp;Marcas horarias</span>', unsafe_allow_html=True)
-
-        t1, t2, t3, t4 = st.columns(4)
-        hora_inicio   = t1.time_input("Entrada *")
-        inicio_receso = t2.time_input("Ini. receso *")
-        final_receso  = t3.time_input("Fin receso *")
-        hora_final    = t4.time_input("Salida *")
-
-        ultima_marca = st.selectbox(
-            "Última marca registrada *",
-            options=["hora_inicio", "inicio_receso", "final_receso", "hora_final"],
-        )
-        submitted = st.form_submit_button("⬡  Registrar asistencia", use_container_width=True)
-
-    if not submitted:
-        return
-
-    missing = required_missing({
-        "Trabajador": worker_label,
-        "Fecha": fecha,
-        "Entrada": hora_inicio,
-        "Ini. receso": inicio_receso,
-        "Fin receso": final_receso,
-        "Salida": hora_final,
-    })
+    missing = [label for label, value in required.items() if not str(value or "").strip()]
     if missing:
-        st.error("Campos requeridos: " + ", ".join(missing))
-        return
+        raise HTTPException(
+            status_code=422, detail="Campos requeridos: " + ", ".join(missing)
+        )
+    valid_password(payload.get("password"), required=True)
+    store_id = str(uuid4())
+    try:
+        qr_token = create_store_with_qr(
+            "tienda",
+            "qr",
+            store_id,
+            {
+                "correo": str(payload.get("correo") or "").strip().lower(),
+                "contrasena": hash_password(payload.get("password")),
+                "nombre": str(payload.get("nombre") or "").strip(),
+                "telefono": str(payload.get("telefono") or "").strip(),
+                "direccion": str(payload.get("direccion") or "").strip(),
+                "fecha_apertura": payload.get("fecha_apertura") or None,
+                "estado": True,
+            },
+        )
+        return {"id_tienda": store_id, "qr_token": qr_token}
+    except Exception as exc:
+        raise api_error(exc, "No se pudo registrar la tienda")
 
-    trabajador = worker_options[worker_label]
-    create_document(ATTENDANCE_COLLECTION, str(uuid4()), {
-        "dni_trabajador": trabajador["dni"],
-        "fecha": fecha.isoformat(),
-        "horario_entrada": _combine_local_datetime(fecha, hora_inicio),
-        "horario_inicio_receso": _combine_local_datetime(fecha, inicio_receso),
-        "horario_fin_receso": _combine_local_datetime(fecha, final_receso),
-        "horario_salida": _combine_local_datetime(fecha, hora_final),
-    })
-    st.success(f"✓  Asistencia registrada → `{ATTENDANCE_COLLECTION}`")
+
+@app.put("/api/stores/{store_id}")
+def edit_store(store_id: str, _admin: AdminUser, payload: dict = Body(...)):
+    if not str(payload.get("nombre") or "").strip() or not str(
+        payload.get("correo") or ""
+    ).strip():
+        raise HTTPException(
+            status_code=422, detail="Nombre y correo son obligatorios."
+        )
+    valid_password(payload.get("password"))
+    data = {
+        "correo": str(payload.get("correo") or "").strip().lower(),
+        "nombre": str(payload.get("nombre") or "").strip(),
+        "telefono": str(payload.get("telefono") or "").strip(),
+        "direccion": str(payload.get("direccion") or "").strip(),
+        "fecha_apertura": payload.get("fecha_apertura") or None,
+        "estado": bool(payload.get("estado", True)),
+    }
+    if str(payload.get("password") or "").strip():
+        data["contrasena"] = hash_password(payload["password"])
+    try:
+        update_document("tienda", store_id, data, key_field="id_tienda")
+        return {"ok": True}
+    except Exception as exc:
+        raise api_error(exc, "No se pudo guardar la tienda")
 
 
-# ── Vista general ──────────────────────────────────────────────────────────────
-@st.dialog("Asistencias del trabajador", width="large")
-def worker_attendance_dialog(trabajador):
-    asistencias = get_asistencias_trabajador(trabajador["id_trabajador"])
-    st.caption(
-        f"{trabajador['nombre_trabajador']} · DNI {trabajador['dni']} · "
-        f"{trabajador['nombre_sede']}"
+@app.patch("/api/stores/{store_id}/status")
+def change_store_status(
+    store_id: str, _admin: AdminUser, payload: dict = Body(...)
+):
+    update_document(
+        "tienda",
+        store_id,
+        {"estado": bool(payload.get("estado"))},
+        key_field="id_tienda",
     )
-
-    if not asistencias:
-        st.info("Este trabajador todavia no tiene asistencias registradas.")
-        return
-
-    attendance_dates = [
-        parsed_date for item in asistencias
-        if (parsed_date := parse_iso_date(item["fecha"]))
-    ]
-    if not attendance_dates:
-        st.warning("Hay asistencias, pero ninguna tiene una fecha valida.")
-        return
-
-    month_key = f"attendance_month_{trabajador['doc_id']}"
-    available_months = sorted({date(d.year, d.month, 1) for d in attendance_dates})
-    if month_key not in st.session_state:
-        st.session_state[month_key] = available_months[-1]
-
-    current_month = st.session_state[month_key]
-    min_month, max_month = available_months[0], available_months[-1]
-    can_go_back = current_month > min_month
-    can_go_next = current_month < max_month
-
-    prev_col, title_col, next_col = st.columns([1, 2, 1])
-    if prev_col.button("←", disabled=not can_go_back, use_container_width=True):
-        st.session_state[month_key] = add_months(current_month, -1)
-        st.rerun(scope="fragment")
-    title_col.markdown(
-        f"<div style='text-align:center;font-family:Space Mono,monospace;"
-        f"font-size:0.9rem;padding-top:0.45rem;'>{format_month(current_month)}</div>",
-        unsafe_allow_html=True,
-    )
-    if next_col.button("→", disabled=not can_go_next, use_container_width=True):
-        st.session_state[month_key] = add_months(current_month, 1)
-        st.rerun(scope="fragment")
-
-    monthly_rows = []
-    for item in asistencias:
-        parsed_date = parse_iso_date(item["fecha"])
-        if not parsed_date:
-            continue
-        if parsed_date.year == current_month.year and parsed_date.month == current_month.month:
-            monthly_rows.append({
-                "fecha": item["fecha"],
-                "tienda": item["nombre_tienda"],
-                "entrada": item["hora_inicio"],
-                "ini_receso": item["inicio_receso"],
-                "fin_receso": item["final_receso"],
-                "salida": item["hora_final"],
-                "ultima_marca": item["ultima_marca"],
-            })
-
-    st.metric("Asistencias del mes", len(monthly_rows))
-    if monthly_rows:
-        st.dataframe(monthly_rows, use_container_width=True, hide_index=True)
-    else:
-        st.info("No hay asistencias en este mes.")
+    return {"ok": True}
 
 
-def overview():
-    tiendas      = get_tiendas()
-    trabajadores = get_trabajadores()
-    asistencias  = get_asistencias()
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Tiendas",              len(tiendas))
-    m2.metric("Trabajadores",         len(trabajadores))
-    m3.metric("Asistencias recientes", len(asistencias))
-
-    st.markdown('<div style="height:1.5rem"></div>', unsafe_allow_html=True)
-
-    tab_t, tab_w, tab_a = st.tabs(["Tiendas", "Trabajadores", "Asistencias"])
-
-    with tab_t:
-        st.caption(f"Tabla: `{STORE_COLLECTION}`")
-        if tiendas:
-            st.dataframe(tiendas, use_container_width=True, hide_index=True)
-        else:
-            st.info("Todavía no hay tiendas registradas.")
-
-    with tab_w:
-        st.caption(f"Tabla: `{WORKER_COLLECTION}`")
-        if trabajadores:
-            st.dataframe(trabajadores, use_container_width=True, hide_index=True)
-            worker_options = {
-                f"{t['nombre_trabajador']}  ·  {t['dni']}": t for t in trabajadores
-            }
-            selected_worker_label = st.selectbox(
-                "Ver asistencias de trabajador",
-                options=list(worker_options.keys()),
-                index=None,
-                placeholder="Selecciona un trabajador",
-            )
-            if st.button(
-                "Ver asistencias",
-                disabled=not selected_worker_label,
-                use_container_width=True,
-            ):
-                worker_attendance_dialog(worker_options[selected_worker_label])
-        else:
-            st.info("Todavía no hay trabajadores registrados.")
-
-    with tab_a:
-        st.caption(f"Tabla: `{ATTENDANCE_COLLECTION}`  ·  últimos 30 registros")
-        if asistencias:
-            st.dataframe(asistencias, use_container_width=True, hide_index=True)
-        else:
-            st.info("Todavía no hay asistencias registradas.")
-
-
-def build_section_context():
-    return SimpleNamespace(
-        ATTENDANCE_COLLECTION=ATTENDANCE_COLLECTION,
-        QR_ACTIVE_COLLECTION=QR_ACTIVE_COLLECTION,
-        STORE_COLLECTION=STORE_COLLECTION,
-        WEEK_DAYS=WEEK_DAYS,
-        WORKER_COLLECTION=WORKER_COLLECTION,
-        build_schedule_inputs=build_schedule_inputs,
-        create_document=create_document,
-        create_store_with_qr=create_store_with_qr,
-        delete_document=delete_document,
-        document_exists=document_exists,
-        format_time=format_time,
-        get_asistencias=get_asistencias,
-        get_asistencias_trabajador=get_asistencias_trabajador,
-        get_asistencia_resumen=get_asistencia_resumen,
-        get_resumen_dashboard=get_resumen_dashboard,
-        get_horarios_trabajador=get_horarios_trabajador,
-        get_tiendas=get_tiendas,
-        get_trabajadores=get_trabajadores,
-        invalidate_collection_cache=invalidate_collection_cache,
-        normalize_doc_id=normalize_doc_id,
-        normalize_email=normalize_email,
-        hash_password=hash_password,
-        server_timestamp=server_timestamp,
-        required_missing=required_missing,
-        section_header=section_header,
-        upload_worker_file=upload_worker_file,
-        save_worker_schedule=save_worker_with_schedule,
-        save_attendance_record=save_attendance_record,
-        update_document=update_document,
-        worker_attendance_dialog=worker_attendance_dialog,
-    )
-
-
-# ── Página principal ───────────────────────────────────────────────────────────
-def admin_page():
-    pages = {
-        "Asistencias": render_resumen,
-        "Salarios": render_salarios,
-        "Correo": render_correo,
-        "Tiendas": render_tiendas,
-        "Trabajadores": render_trabajadores,
-        "Marcas": render_asistencias_multiples,
+@app.get("/api/workers")
+def workers(_admin: AdminUser):
+    dashboard = load_dashboard(include_attendances=False)
+    return {
+        "workers": dashboard["workers"],
+        "stores": dashboard["stores"],
+        "schedules": dashboard["schedules"],
     }
 
-    st.markdown('<div class="admin-content-wrapper"></div>', unsafe_allow_html=True)
 
-    sidebar_placeholder = st.sidebar.empty()
-    with sidebar_placeholder.container():
-        st.markdown("""
-            <div style="position: relative; z-index: 2;">
-            <div style="padding:1rem 0 1.5rem; text-align: center;">
-                <div style="font-family:'Space Mono',monospace;font-size:1.1rem;color:#ffffff;font-weight:700; width:100%;">
-                    Admin Asistencia
-                </div>
-                <div style="font-size:0.78rem;color:#ffffff;margin-top:0.3rem;font-weight:500; width:100%;">
-                    Panel de RRHH
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        current_page = st.radio(
-            "Sección",
-            options=list(pages.keys()),
-            label_visibility="collapsed",
+@app.post("/api/uploads/worker-document")
+async def upload_worker_document(
+    _admin: AdminUser,
+    file: UploadFile,
+    dni: str = Query(..., min_length=1),
+):
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".pdf"}:
+        raise HTTPException(
+            status_code=422, detail="Solo se admite JPG, PNG o PDF."
         )
-
-        st.markdown('<div style="flex: 1;"></div>', unsafe_allow_html=True)
-
-        if st.button("↪ Cerrar sesión", use_container_width=True, key="logout_btn"):
-            logout()
-            sidebar_placeholder.empty()
-            return True
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # Stream the background instead of embedding ~10 MB of base64 on every
-    # navigation rerun.
-    if BACKGROUND_IMAGE_PATH.exists():
-        with st.container(key="admin_background"):
-            st.image(str(BACKGROUND_IMAGE_PATH), width="stretch")
-        st.markdown(
-            """
-        <style>
-        .st-key-admin_background,
-        .st-key-admin_background [data-testid="stImage"],
-        .st-key-admin_background img {
-            position: fixed !important;
-            inset: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            max-width: none !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            object-fit: cover !important;
-            object-position: center center !important;
-            pointer-events: none !important;
-        }
-
-        .st-key-admin_background {
-            z-index: -1 !important;
-        }
-
-        html.admin-ready [data-testid="stVideo"],
-        html.admin-ready .login-transition-cover,
-        html.admin-ready .login-overlay,
-        html.admin-ready [data-testid="stHorizontalBlock"]:has(.login-logo) {
-            display: none !important;
-        }
-
-        html.admin-ready [data-testid="stSidebar"] {
-            display: flex !important;
-        }
-        </style>
-            """,
-            unsafe_allow_html=True,
+    content = await file.read()
+    if len(content) > 12 * 1024 * 1024:
+        raise HTTPException(
+            status_code=422, detail="El archivo supera el máximo de 12 MB."
         )
-        components.html(
-            """
-            <script>
-            (() => {
-                const parentDocument = window.parent.document;
-                const revealAdmin = () => {
-                    parentDocument.documentElement.classList.remove("login-submitting");
-                    parentDocument.documentElement.classList.add("admin-ready");
-                };
+    try:
+        return upload_worker_file(content, file.filename or f"dni{suffix}", dni)
+    except Exception as exc:
+        raise api_error(exc, "No se pudo subir el documento")
 
-                const waitForBackground = () => {
-                    const image = parentDocument.querySelector(
-                        ".st-key-admin_background img"
-                    );
-                    if (!image) return false;
 
-                    if (image.complete && image.naturalWidth > 0) {
-                        requestAnimationFrame(revealAdmin);
-                    } else {
-                        image.addEventListener("load", revealAdmin, { once: true });
-                        image.addEventListener("error", revealAdmin, { once: true });
-                    }
-                    return true;
-                };
-
-                if (!waitForBackground()) {
-                    const observer = new MutationObserver(() => {
-                        if (waitForBackground()) observer.disconnect();
-                    });
-                    observer.observe(parentDocument.documentElement, {
-                        childList: true,
-                        subtree: true,
-                    });
-                    window.setTimeout(() => {
-                        observer.disconnect();
-                        revealAdmin();
-                    }, 2500);
-                }
-            })();
-            </script>
-            """,
-            height=0,
-            width=0,
+def save_worker_payload(dni: str, payload: dict, creating: bool) -> None:
+    if not dni.strip() or not str(payload.get("nombre") or "").strip():
+        raise HTTPException(
+            status_code=422, detail="DNI y nombre son obligatorios."
         )
-    
-    st.markdown("""
-    <div class="hero-banner">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
-            <div style="display:flex; align-items:center; gap:0.8rem;">
-                <div style="font-size:1.45rem; color:#78bdf2; line-height:1;">⬡</div>
-                <div>
-                    <div style="font-family:'Space Mono',monospace; font-size:1.35rem;
-                                letter-spacing:0.04em; color:#000000; line-height:1;">
-                        Panel de Administración
-                    </div>
-                    <div style="font-size:0.79rem; color:var(--text); font-family:'DM Sans',sans-serif;
-                                margin-top:0.24rem;">
-                        Sistema de Asistencia
-                    </div>
-                </div>
-            </div>
-            <div style="font-family:'Space Mono',monospace;font-size:0.64rem;letter-spacing:0.08em;
-                        text-transform:uppercase;padding:0.38rem 0.7rem;border-radius:8px;
-                        color:#ffffff;background:var(--tertiary);">
-                {current_page}
-            </div>
-        </div>
-    </div>
-    <hr style="margin: 0.85rem 0 1.5rem; border-color:#cfe3f7;">
-    """.replace("{current_page}", current_page), unsafe_allow_html=True)
-
-    pages[current_page](build_section_context())
-    return False
-
-
-def main():
-    login_placeholder = None
-    hydrate_auth_from_query_params()
-    if not is_authenticated():
-        authenticated, login_placeholder = render_login()
-        if not authenticated:
-            return
-
-    admin_placeholder = st.empty()
-    with admin_placeholder.container():
-        logged_out = admin_page()
-
-    if logged_out:
-        admin_placeholder.empty()
-        render_login()
-        return
+    if not str(payload.get("id_tienda") or "").strip():
+        raise HTTPException(status_code=422, detail="Selecciona una tienda.")
+    schedules = payload.get("schedules") or []
+    if not schedules:
+        raise HTTPException(
+            status_code=422, detail="Selecciona al menos un día laborable."
+        )
+    valid_password(payload.get("password"), required=creating)
+    if creating and not str(payload.get("foto_dni") or "").strip():
+        raise HTTPException(
+            status_code=422, detail="La foto o documento de DNI es obligatorio."
+        )
+    data = {
+        "dni": dni.strip(),
+        "id_tienda": payload.get("id_tienda"),
+        "correo": str(payload.get("correo") or "").strip().lower(),
+        "nombre": str(payload.get("nombre") or "").strip(),
+        "cargo": str(payload.get("cargo") or "").strip(),
+        "sueldo": float(payload.get("sueldo") or 0),
+        "telefono": str(payload.get("telefono") or "").strip(),
+        "csi": str(payload.get("csi") or "").strip(),
+        "foto_dni": str(payload.get("foto_dni") or "").strip(),
+        "estado": bool(payload.get("estado", True)),
+    }
+    if str(payload.get("password") or "").strip():
+        data["contrasena"] = str(payload["password"]).strip()
+    upsert_document("trabajador", dni, data, key_field="dni")
+    replace_worker_schedule(dni, schedules)
 
 
+@app.post("/api/workers")
+def create_worker(_admin: AdminUser, payload: dict = Body(...)):
+    dni = str(payload.get("dni") or "").strip()
+    try:
+        save_worker_payload(dni, payload, creating=True)
+        return {"dni": dni}
+    except Exception as exc:
+        raise api_error(exc, "No se pudo registrar el trabajador")
 
-if __name__ == "__main__":
-    main()
+
+@app.put("/api/workers/{dni}")
+def edit_worker(dni: str, _admin: AdminUser, payload: dict = Body(...)):
+    try:
+        save_worker_payload(dni, payload, creating=False)
+        return {"ok": True}
+    except Exception as exc:
+        raise api_error(exc, "No se pudo guardar el trabajador")
+
+
+@app.patch("/api/workers/{dni}/status")
+def change_worker_status(
+    dni: str, _admin: AdminUser, payload: dict = Body(...)
+):
+    update_document(
+        "trabajador",
+        dni,
+        {"estado": bool(payload.get("estado"))},
+        key_field="dni",
+    )
+    return {"ok": True}
+
+
+@app.get("/api/workers/export.pdf")
+def export_workers(
+    _admin: AdminUser,
+    store_id: str = "",
+    q: str = "",
+):
+    dashboard = load_dashboard(include_attendances=False)
+    rows = dashboard["workers"]
+    if store_id:
+        rows = [row for row in rows if row["id_sede"] == store_id]
+    if q:
+        lowered = q.lower()
+        rows = [
+            row
+            for row in rows
+            if lowered
+            in f"{row['nombre_trabajador']} {row['dni']} {row['area']}".lower()
+        ]
+    store = next(
+        (
+            row["nombre_tienda"]
+            for row in dashboard["stores"]
+            if row["id_tienda"] == store_id
+        ),
+        "Todas",
+    )
+    return attachment(
+        workers_pdf(rows, store, q),
+        "application/pdf",
+        "trabajadores.pdf",
+    )
+
+
+def attendance_result(
+    period: str,
+    reference: str,
+    store_id: str,
+    worker_dni: str,
+    q: str,
+) -> tuple[dict, str]:
+    selected = parse_date(reference) or date.today()
+    start, end, label = (
+        fortnight_bounds(selected)
+        if period == "fortnight"
+        else month_bounds(selected)
+    )
+    result = attendance_period(
+        load_dashboard(),
+        start,
+        end,
+        store_id=store_id,
+        worker_dni=worker_dni,
+        query=q,
+    )
+    result["label"] = label
+    return result, label
+
+
+@app.get("/api/attendance")
+def attendance(
+    _admin: AdminUser,
+    period: str = "month",
+    reference: str = "",
+    store_id: str = "",
+    worker_dni: str = "",
+    q: str = "",
+):
+    result, _label = attendance_result(
+        period, reference, store_id, worker_dni, q
+    )
+    return result
+
+
+@app.patch("/api/attendance/{attendance_id}/justify")
+def justify_attendance(attendance_id: str, _admin: AdminUser):
+    update_document(
+        "asistencia",
+        attendance_id,
+        {"justificado": True},
+        key_field="id_asistencia",
+    )
+    return {"ok": True}
+
+
+@app.get("/api/attendance/export.{kind}")
+def export_attendance(
+    kind: str,
+    _admin: AdminUser,
+    period: str = "month",
+    reference: str = "",
+    store_id: str = "",
+    worker_dni: str = "",
+    q: str = "",
+):
+    result, label = attendance_result(
+        period, reference, store_id, worker_dni, q
+    )
+    metadata = {**result, "label": label}
+    if kind == "xlsx":
+        return attachment(
+            attendance_excel(result["rows"], metadata),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "reporte_asistencias.xlsx",
+        )
+    if kind == "pdf":
+        return attachment(
+            attendance_pdf(result["rows"], result["workers"], metadata),
+            "application/pdf",
+            "reporte_asistencias.pdf",
+        )
+    raise HTTPException(status_code=404, detail="Formato no disponible.")
+
+
+@app.get("/api/salaries/{dni}")
+def salary(
+    dni: str,
+    _admin: AdminUser,
+    month: str = "",
+    reference_days: int = 26,
+    hours_per_day: float = 8,
+    tolerance_minutes: int = 0,
+    penalty_mode: str = "hour",
+    fixed_penalty: float = 0,
+):
+    selected = parse_date(month) or date.today().replace(day=1)
+    try:
+        return salary_summary(
+            load_dashboard(),
+            dni,
+            selected.replace(day=1),
+            reference_days,
+            hours_per_day,
+            tolerance_minutes,
+            penalty_mode,
+            fixed_penalty,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/api/email-configs")
+def email_configs(_admin: AdminUser):
+    return jsonable_encoder(list_email_configs())
+
+
+@app.post("/api/email-configs")
+def create_email_config(_admin: AdminUser, payload: dict = Body(...)):
+    if not str(payload.get("correo_destino") or "").strip() or not str(
+        payload.get("hora_envio") or ""
+    ).strip():
+        raise HTTPException(
+            status_code=422, detail="Correo y hora de envío son obligatorios."
+        )
+    return {"id_config": save_email_config(payload)}
+
+
+@app.put("/api/email-configs/{config_id}")
+def edit_email_config(
+    config_id: str, _admin: AdminUser, payload: dict = Body(...)
+):
+    save_email_config(payload, config_id)
+    return {"ok": True}
+
+
+@app.delete("/api/email-configs/{config_id}")
+def remove_email_config(config_id: str, _admin: AdminUser):
+    delete_email_config(config_id)
+    return {"ok": True}
+
+
+@app.get("/api/marks")
+def marks(
+    _admin: AdminUser,
+    start: str,
+    end: str,
+    store_id: str = "",
+    worker_dni: str = "",
+):
+    start_date = parse_date(start)
+    end_date = parse_date(end)
+    if not start_date or not end_date or start_date > end_date:
+        raise HTTPException(status_code=422, detail="Rango de fechas no válido.")
+    return jsonable_encoder(
+        list_marks(start_date, end_date, store_id, worker_dni)
+    )
+
+
+@app.get("/api/marks/export.xlsx")
+def export_marks(
+    _admin: AdminUser,
+    start: str,
+    end: str,
+    store_id: str = "",
+    worker_dni: str = "",
+):
+    start_date = parse_date(start)
+    end_date = parse_date(end)
+    if not start_date or not end_date:
+        raise HTTPException(status_code=422, detail="Fechas no válidas.")
+    rows = list_marks(start_date, end_date, store_id, worker_dni)
+    return attachment(
+        marks_excel(rows),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "marcas_asistencia.xlsx",
+    )
+
+
+@app.get("/media/{filename}")
+def media(filename: str):
+    allowed = {
+        "fondo.png",
+        "fondoo.png",
+        "fondologin.mp4",
+        "fondologiin.mp4",
+        "Sidebarfondo.mp4",
+    }
+    if filename not in allowed:
+        raise HTTPException(status_code=404)
+    path = ROOT / filename
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    return FileResponse(path)
+
+
+if DIST.exists():
+    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+
+@app.get("/{full_path:path}")
+def frontend(full_path: str):
+    index = DIST / "index.html"
+    if index.exists():
+        return FileResponse(index)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Frontend no compilado. Ejecuta `npm run build` en `frontend`."
+        },
+    )

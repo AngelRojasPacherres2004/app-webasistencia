@@ -1,21 +1,26 @@
-# Secrets / local credentials
-.streamlit/secrets.toml
-.streamlit/secret.toml
-.streamlit/secrets,toml
-.streamlit/firebase-service-account.json
+# Secrets and local credentials
+.env
+.env.*
+!.env.example
+.secrets.toml
 
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
 .pytest_cache/
 .mypy_cache/
-
-# Virtual environments
-venv/
 .venv/
+venv/
 env/
 
-# Local environment files
-.env
-.env.*
+# React / Vite
+frontend/node_modules/
+frontend/dist/
+artifacts/
+*.log
+
+# Editors and operating system
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
