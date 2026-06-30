@@ -349,15 +349,39 @@ def attendance_result(
         if period == "fortnight"
         else month_bounds(selected)
     )
+    dashboard = load_dashboard()
     result = attendance_period(
-        load_dashboard(),
+        dashboard,
         start,
         end,
         store_id=store_id,
         worker_dni=worker_dni,
         query=q,
     )
-    result["label"] = label
+    store_label = next(
+        (
+            store["nombre_tienda"]
+            for store in dashboard["stores"]
+            if str(store.get("id_tienda")) == str(store_id)
+        ),
+        "Todas las tiendas",
+    )
+    worker_label = next(
+        (
+            worker["nombre_trabajador"]
+            for worker in dashboard["workers"]
+            if str(worker.get("dni")) == str(worker_dni)
+        ),
+        "Todas",
+    )
+    result.update(
+        {
+            "label": label,
+            "store_label": store_label,
+            "worker_label": worker_label,
+            "search": q,
+        }
+    )
     return result, label
 
 
@@ -401,17 +425,20 @@ def export_attendance(
         period, reference, store_id, worker_dni, q
     )
     metadata = {**result, "label": label}
+    period_slug = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+    scope_slug = "todas" if not store_id and not worker_dni else "filtradas"
+    filename = f"asistencias_{period_slug}_{scope_slug}"
     if kind == "xlsx":
         return attachment(
             attendance_excel(result["rows"], metadata),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "reporte_asistencias.xlsx",
+            f"{filename}.xlsx",
         )
     if kind == "pdf":
         return attachment(
             attendance_pdf(result["rows"], result["workers"], metadata),
             "application/pdf",
-            "reporte_asistencias.pdf",
+            f"{filename}.pdf",
         )
     raise HTTPException(status_code=404, detail="Formato no disponible.")
 
