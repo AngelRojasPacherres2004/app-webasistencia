@@ -50,10 +50,12 @@ export async function download(path, filename) {
     throw new Error(data.detail || "No se pudo generar el archivo.");
   }
   const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const serverFilename = disposition.match(/filename="?([^";]+)"?/i)?.[1];
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = filename;
+  anchor.download = filename || serverFilename || "descarga";
   anchor.click();
   URL.revokeObjectURL(url);
 }

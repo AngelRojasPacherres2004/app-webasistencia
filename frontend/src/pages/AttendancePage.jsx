@@ -52,7 +52,7 @@ export default function AttendancePage({ notify }) {
 
   const exportReport = async (kind) => {
     try {
-      await download(`/api/attendance/export.${kind}?${query(filters)}`, `reporte_asistencias.${kind}`);
+      await download(`/api/attendance/export.${kind}?${query(filters)}`);
       notify("Reporte generado correctamente.");
     } catch (requestError) {
       notify(requestError.message, "error");
