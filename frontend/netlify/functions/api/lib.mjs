@@ -32,6 +32,15 @@ const bool = (value) =>
 
 export function formatTime(value) {
   if (!value) return "";
+  if (value instanceof Date) {
+    if (Number.isNaN(value.valueOf())) return "";
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/Lima",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(value);
+  }
   const text = String(value).trim();
   if (text.includes("T")) {
     const parsed = new Date(text);
@@ -43,6 +52,20 @@ export function formatTime(value) {
     }
   }
   return text.includes(" ") ? text.split(" ").at(-1).slice(0, 5) : text.slice(0, 5);
+}
+
+function dateOnly(value) {
+  if (!value) return "";
+  if (value instanceof Date) {
+    if (Number.isNaN(value.valueOf())) return "";
+    return [
+      value.getUTCFullYear(),
+      String(value.getUTCMonth() + 1).padStart(2, "0"),
+      String(value.getUTCDate()).padStart(2, "0"),
+    ].join("-");
+  }
+  const match = String(value).match(/^\d{4}-\d{2}-\d{2}/);
+  return match?.[0] || "";
 }
 
 export function timeMinutes(value) {
@@ -87,7 +110,7 @@ function serializeStore(row) {
     nombre_tienda: row.nombre || "",
     direccion: row.direccion || "",
     telefono: row.telefono || "",
-    fecha_apertura: String(row.fecha_apertura || "").slice(0, 10),
+    fecha_apertura: dateOnly(row.fecha_apertura),
     estado: bool(row.estado ?? true),
   };
 }
@@ -118,7 +141,7 @@ function serializeWorker(row, stores, scheduleMap) {
 function serializeAttendance(row) {
   return {
     id_asistencia: String(row.id_asistencia ?? row.doc_id ?? ""),
-    fecha: String(row.fecha || "").slice(0, 10),
+    fecha: dateOnly(row.fecha),
     id_tienda: String(row.id_tienda ?? ""),
     nombre_tienda: row.nombre_tienda || "",
     dni: String(row.dni_trabajador ?? row.dni ?? ""),
