@@ -261,6 +261,66 @@ td strong { color: #1b344d; }
 .badge--warning { color: #9a5d12; background: #fff0ce; }
 .badge--danger { color: #a52c40; background: #ffe3e8; }
 .badge--blue { color: #236da5; background: #e1f1fc; }
+.attendance-board { padding: 0; overflow: hidden; }
+.attendance-board__title { margin: 0; padding: 22px 22px 14px; }
+.attendance-legend {
+  padding: 0 22px 18px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+}
+.attendance-legend__item {
+  padding: 7px 11px; border-radius: 999px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px; font-weight: 800;
+}
+.attendance-legend__item--on-time { color: #137548; background: #dcf8e8; }
+.attendance-legend__item--late { color: #995608; background: #ffedc4; }
+.attendance-legend__item--justified { color: #245fb9; background: #e5edff; }
+.attendance-legend__item--absent { color: #a62b37; background: #ffeaed; }
+.attendance-legend__item--missing { color: #52657a; background: #e8edf3; }
+.attendance-legend__item--off { color: #5e6b7b; background: #e2e6eb; }
+.attendance-week { border-top: 1px solid #e5edf3; }
+.attendance-week__range {
+  margin: 0; padding: 13px 22px; color: #61758a; background: rgba(246,249,252,.82);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px;
+}
+.attendance-week__range strong { color: #294965; }
+.attendance-matrix-scroll { width: 100%; overflow-x: auto; }
+.attendance-matrix { min-width: 1030px; table-layout: fixed; background: rgba(255,255,255,.82); }
+.attendance-matrix th { height: 55px; padding: 10px 13px; background: #f7f9fb; }
+.attendance-matrix th:first-child {
+  position: sticky; z-index: 3; left: 0; width: 330px; background: #f7f9fb;
+}
+.attendance-matrix th:not(:first-child) { width: 132px; }
+.attendance-matrix th span, .attendance-matrix th small { display: block; }
+.attendance-matrix th span { color: #54687e; font-size: 9px; letter-spacing: .12em; }
+.attendance-matrix th small { margin-top: 3px; color: #8292a3; font-size: 9px; letter-spacing: .08em; }
+.attendance-matrix td { height: 78px; padding: 10px 8px; background: rgba(255,255,255,.92); }
+.attendance-matrix td:first-child {
+  position: sticky; z-index: 2; left: 0; padding: 13px 16px; background: #fff;
+}
+.attendance-matrix td:first-child strong, .attendance-matrix td:first-child small { display: block; }
+.attendance-matrix td:first-child strong {
+  color: #172c44; font-size: 12px; line-height: 1.25;
+}
+.attendance-matrix td:first-child small {
+  margin-top: 4px; overflow: hidden; color: #6b8096; font-size: 10px; text-overflow: ellipsis; white-space: nowrap;
+}
+.attendance-cell {
+  min-height: 53px; padding: 8px 10px; display: flex; position: relative; flex-direction: column;
+  align-items: flex-start; justify-content: center; border-radius: 11px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; font-weight: 750;
+}
+.attendance-cell span { line-height: 1.5; }
+.attendance-cell span + span { font-weight: 900; }
+.attendance-cell strong {
+  width: 100%; color: inherit; font-size: 9px; letter-spacing: .08em; text-align: center; text-transform: uppercase;
+}
+.attendance-cell--on-time { color: #126b41; background: #d9f8e6; }
+.attendance-cell--late { color: #8a4c00; background: #ffb11a; }
+.attendance-cell--justified { color: #245fba; background: #e3edff; }
+.attendance-cell--absent { color: #aa2c38; background: #ffedf0; }
+.attendance-cell--missing { color: #52657a; background: #e8edf3; }
+.attendance-cell--off { color: #526176; background: #e1e5ea; }
+.attendance-cell--pending { color: #9aa7b4; background: #f4f7f9; }
+.attendance-cell--outside { align-items: center; color: #c3cbd3; background: transparent; }
 .empty { min-height: 210px; padding: 35px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #73869a; }
 .empty > span { font-size: 38px; color: #8eb9d7; }
 .empty strong { margin-top: 10px; color: #38536c; font-size: 16px; }
@@ -344,6 +404,7 @@ td strong { color: #1b344d; }
   .page-header { align-items: flex-start; flex-direction: column; }
   .metrics-grid, .metrics-grid--salary { grid-template-columns: repeat(2, 1fr); }
   .config-grid { grid-template-columns: 1fr; }
+  .attendance-matrix th:first-child { width: 250px; }
 }
 
 @media (max-width: 590px) {
@@ -371,4 +432,9 @@ td strong { color: #1b344d; }
   .modal-actions .button { flex: 1; }
   .pagination { align-items: stretch; flex-direction: column; }
   .pagination > div { justify-content: space-between; }
+  .attendance-board__title { padding: 17px 15px 12px; }
+  .attendance-legend { padding: 0 15px 15px; }
+  .attendance-week__range { padding: 11px 15px; }
+  .attendance-matrix th:first-child { width: 205px; }
+  .attendance-matrix td:first-child { padding: 11px; }
 }

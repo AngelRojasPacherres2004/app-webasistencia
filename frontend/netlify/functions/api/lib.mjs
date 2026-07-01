@@ -86,6 +86,18 @@ export function periodBounds(reference, period) {
   const selected = localDate(reference) || new Date();
   const year = selected.getFullYear();
   const month = selected.getMonth();
+  if (period === "week") {
+    const start = new Date(selected);
+    start.setDate(selected.getDate() - ((selected.getDay() + 6) % 7));
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    const shortDate = (date) =>
+      `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+    return {
+      start, end,
+      label: `Semana ${shortDate(start)} — ${shortDate(end)}`,
+    };
+  }
   if (period === "fortnight") {
     const first = selected.getDate() <= 15;
     const start = new Date(year, month, first ? 1 : 16, 12);
