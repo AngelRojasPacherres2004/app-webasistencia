@@ -21,6 +21,7 @@ from backend.data import (
     month_bounds,
     parse_date,
     salary_summary,
+    week_bounds,
 )
 from backend.database import (
     delete_email_config,
@@ -344,11 +345,12 @@ def attendance_result(
     q: str,
 ) -> tuple[dict, str]:
     selected = parse_date(reference) or date.today()
-    start, end, label = (
-        fortnight_bounds(selected)
-        if period == "fortnight"
-        else month_bounds(selected)
-    )
+    if period == "week":
+        start, end, label = week_bounds(selected)
+    elif period == "fortnight":
+        start, end, label = fortnight_bounds(selected)
+    else:
+        start, end, label = month_bounds(selected)
     dashboard = load_dashboard()
     result = attendance_period(
         dashboard,

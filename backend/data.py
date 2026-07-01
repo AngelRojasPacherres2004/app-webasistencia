@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from math import ceil
 from zoneinfo import ZoneInfo
 
@@ -328,6 +328,16 @@ def fortnight_bounds(reference: date) -> tuple[date, date, str]:
     )
     suffix = "Quincena 1" if reference.day <= 15 else "Quincena 2"
     return start, end, f"{MONTH_NAMES[start.month - 1]} {start.year} · {suffix}"
+
+
+def week_bounds(reference: date) -> tuple[date, date, str]:
+    start = reference - timedelta(days=reference.weekday())
+    end = start + timedelta(days=6)
+    label = (
+        f"Semana {start.strftime('%d/%m/%Y')} "
+        f"— {end.strftime('%d/%m/%Y')}"
+    )
+    return start, end, label
 
 
 def scheduled_day_hours(schedule: dict) -> float:

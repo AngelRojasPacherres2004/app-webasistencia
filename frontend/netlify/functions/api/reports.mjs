@@ -4,54 +4,62 @@ import { formatTime } from "./lib.mjs";
 
 const BLUE = "1E3A5F";
 const LIGHT_BLUE = "DBEAFE";
-
-const fitColumns = (sheet, maximum = 38) => {
+const MM = 2.83465;
+const fitColumns = (sheet, maximum = 42, padding = 4) => {
   sheet.columns.forEach((column) => {
-    let width = 10;
+    let width = 0;
     column.eachCell?.({ includeEmpty: true }, (cell) => {
-      width = Math.max(width, String(cell.value ?? "").length + 2);
+      width = Math.max(width, String(cell.value ?? "").length + padding);
     });
     column.width = Math.min(width, maximum);
   });
 };
-
 const workbookBuffer = async (workbook) => Buffer.from(await workbook.xlsx.writeBuffer());
+const reportDate = (value) => {
+  const [year, month, day] = String(value || "").slice(0, 10).split("-");
+  return year && month && day ? `${day}/${month}/${year}` : "-";
+};
+const generatedAt = () => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date()).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  return `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}`;
+};
+const minutes = (value) => {
+  const [hour, minute] = formatTime(value).split(":").map(Number);
+  return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : null;
+};
 
 export async function attendanceExcel(rows, metadata) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Gestión de Asistencia";
-  const sheet = workbook.addWorksheet("Resumen", { views: [{ state: "frozen", ySplit: 10 }] });
-  sheet.mergeCells("A1:M1");
+  const sheet = workbook.addWorksheet("Resumen");
   const title = sheet.getCell("A1");
   title.value = "Reporte de Asistencias";
-  title.font = { color: { argb: "FFFFFFFF" }, bold: true, size: 16 };
+  title.font = { color: { argb: "FFFFFFFF" }, bold: true };
   title.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${BLUE}` } };
-  title.alignment = { horizontal: "center", vertical: "middle" };
-  sheet.getRow(1).height = 28;
-  const info = [
+  title.alignment = { horizontal: "center" };
+  [
     ["Periodo", metadata.label || "-"],
-    ["Rango", `${metadata.start || "-"} - ${metadata.end || "-"}`],
+    ["Rango", `${reportDate(metadata.start)} - ${reportDate(metadata.end)}`],
     ["Tienda", metadata.store_label || "Todas las tiendas"],
     ["Persona", metadata.worker_label || "Todas"],
     ["Búsqueda", metadata.search || "-"],
-    ["Generado", new Intl.DateTimeFormat("es-PE", { dateStyle: "short", timeStyle: "short", timeZone: "America/Lima" }).format(new Date())],
-  ];
-  info.forEach(([label, value], index) => {
+    ["Generado", generatedAt()],
+  ].forEach(([label, value], index) => {
     sheet.getCell(index + 3, 1).value = label;
     sheet.getCell(index + 3, 1).font = { bold: true };
     sheet.getCell(index + 3, 2).value = value;
   });
-  const headers = [
+  const header = sheet.getRow(10);
+  header.values = [
     "#", "Trabajador", "DNI", "Sede", "Fecha", "Entrada", "Ini. receso",
     "Fin receso", "Salida", "Horas", "Cálculo horas", "Tardanza", "Justificado",
   ];
-  const header = sheet.getRow(10);
-  header.values = headers;
   header.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: `FF${BLUE}` } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: `FF${LIGHT_BLUE}` } };
     cell.alignment = { horizontal: "center" };
-    cell.border = { bottom: { style: "thin", color: { argb: "FF93C5FD" } } };
   });
   rows.forEach((row, index) => {
     const start = minutes(row.hora_inicio);
@@ -67,8 +75,11 @@ export async function attendanceExcel(rows, metadata) {
       row.late ? "Sí" : "No", row.justificado ? "Sí" : "No",
     ]);
   });
-  sheet.autoFilter = rows.length ? `A10:M${sheet.rowCount}` : undefined;
-  fitColumns(sheet);
+  if (rows.length) {
+    sheet.views = [{ state: "frozen", ySplit: 10, topLeftCell: "A11" }];
+    sheet.autoFilter = `A10:M${sheet.rowCount}`;
+  }
+  fitColumns(sheet, 40, 4);
   return workbookBuffer(workbook);
 }
 
@@ -91,20 +102,21 @@ export async function marksExcel(rows) {
   return workbookBuffer(workbook);
 }
 
-const minutes = (value) => {
-  const text = formatTime(value);
-  if (!text) return null;
-  const [hour, minute] = text.split(":").map(Number);
-  return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : null;
-};
-
-const safeText = (value) => String(value ?? "").replace(/[^\x20-\x7EÀ-ÿ]/g, " ");
-
-function drawText(page, font, text, x, y, size = 8, color = rgb(0.08, 0.12, 0.18), maxWidth = 160) {
+const safeText = (value) => String(value ?? "").replaceAll("—", "-").replaceAll("…", "...").replace(/[^\x20-\x7E\u00A0-\u00FF]/g, " ");
+function drawText(page, font, text, x, y, size = 8, color = rgb(0.08, 0.12, 0.18), maxWidth = 160, centered = false) {
   let output = safeText(text);
-  while (output.length > 1 && font.widthOfTextAtSize(output, size) > maxWidth) output = `${output.slice(0, -2)}…`;
-  page.drawText(output, { x, y, size, font, color });
+  while (output.length > 1 && font.widthOfTextAtSize(output, size) > maxWidth) output = `${output.slice(0, -4)}...`;
+  const offset = centered ? Math.max((maxWidth - font.widthOfTextAtSize(output, size)) / 2, 3) : 0;
+  page.drawText(output, { x: x + offset, y, size, font, color });
 }
+const pdfColor = (hex) => {
+  const value = hex.replace("#", "");
+  return rgb(Number.parseInt(value.slice(0, 2), 16) / 255, Number.parseInt(value.slice(2, 4), 16) / 255, Number.parseInt(value.slice(4, 6), 16) / 255);
+};
+const cell = (page, x, y, width, height, fill, border = "#64748B") =>
+  page.drawRectangle({ x, y: y - height, width, height, color: pdfColor(fill), borderColor: pdfColor(border), borderWidth: 0.35 });
+const isoDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const dateLabel = (date) => `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
 
 export async function workersPdf(workers, storeLabel, query) {
   const pdf = await PDFDocument.create();
@@ -129,8 +141,7 @@ export async function workersPdf(workers, storeLabel, query) {
     if (index % 2) page.drawRectangle({ x: 32, y: y - 6, width: 778, height: 22, color: rgb(0.97, 0.98, 0.99) });
     const values = [
       index + 1, worker.nombre_trabajador || "-", worker.dni || "-", worker.area || "-",
-      worker.nombre_sede || "-", worker.correo || "-", worker.telefono || "-",
-      worker.estado ? "Activo" : "Inactivo",
+      worker.nombre_sede || "-", worker.correo || "-", worker.telefono || "-", worker.estado ? "Activo" : "Inactivo",
     ];
     values.forEach((value, column) => drawText(page, regular, value, columns[column], y, 7, undefined, column === 1 ? 145 : column === 5 ? 160 : 90));
     y -= 22;
@@ -143,49 +154,191 @@ export async function attendancePdf(rows, workers, metadata) {
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const pageSize = [841.89, 595.28];
+  const margin = 10 * MM;
+  const pageWidth = pageSize[0] - (margin * 2);
+  const colors = {
+    black: "#0F172A", dark: "#1E293B", muted: "#64748B", light: "#F1F5F9",
+    header: "#1E3A5F", alternate: "#F8FAFC", accent: "#2563EB",
+    onFill: "#DCFCE7", onText: "#166534", lateFill: "#FEF3C7", lateText: "#92400E",
+    justifiedFill: "#DBEAFE", justifiedText: "#1D4ED8", absent: "#DC2626",
+  };
   const start = new Date(`${metadata.start}T12:00:00`);
   const end = new Date(`${metadata.end}T12:00:00`);
-  const index = new Map(rows.map((row) => [`${row.dni}-${row.fecha}`, row]));
-  let week = new Date(start);
-  week.setDate(week.getDate() - ((week.getDay() + 6) % 7));
-  let weekNumber = 1;
-  while (week <= end) {
+  const sortedWorkers = [...workers].sort((a, b) => {
+    const first = String(a.nombre_trabajador || "");
+    const second = String(b.nombre_trabajador || "");
+    return first < second ? -1 : first > second ? 1 : 0;
+  });
+  const attendance = new Map(rows.map((row) => [`${String(row.dni || "").trim()}-${row.fecha}`, row]));
+  const lateCount = rows.filter((row) => row.late).length;
+  const generated = generatedAt();
+  const weeks = [];
+  const cursor = new Date(start);
+  cursor.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  while (cursor <= end) {
     const days = Array.from({ length: 6 }, (_, offset) => {
-      const day = new Date(week); day.setDate(day.getDate() + offset); return day;
+      const day = new Date(cursor);
+      day.setDate(cursor.getDate() + offset);
+      return day;
     }).filter((day) => day >= start && day <= end);
-    if (!days.length) { week.setDate(week.getDate() + 7); continue; }
-    const chunks = [];
-    for (let offset = 0; offset < workers.length || offset === 0; offset += 16) chunks.push(workers.slice(offset, offset + 16));
-    chunks.forEach((chunk, pageIndex) => {
-      const page = pdf.addPage(pageSize);
-      drawText(page, bold, "Reporte de Asistencias", 28, 558, 16, rgb(0.08, 0.18, 0.32), 500);
-      drawText(page, regular, `${metadata.label} · ${metadata.start} - ${metadata.end} · ${metadata.store_label || "Todas las tiendas"}`, 28, 540, 8, undefined, 780);
-      drawText(page, bold, `Semana ${weekNumber}${pageIndex ? " (continuación)" : ""}`, 28, 514, 9, rgb(0.12, 0.25, 0.55), 160);
-      const nameWidth = 185;
-      const dayWidth = (780 - nameWidth) / days.length;
-      page.drawRectangle({ x: 28, y: 480, width: 780, height: 25, color: rgb(0.12, 0.23, 0.37) });
-      drawText(page, bold, "Trabajador", 34, 489, 7, rgb(1, 1, 1), nameWidth - 12);
-      days.forEach((day, dayIndex) => {
-        const label = new Intl.DateTimeFormat("es-PE", { weekday: "short", day: "2-digit", month: "2-digit" }).format(day);
-        drawText(page, bold, label, 28 + nameWidth + dayIndex * dayWidth + 5, 489, 7, rgb(1, 1, 1), dayWidth - 8);
-      });
-      let y = 460;
-      chunk.forEach((worker, rowIndex) => {
-        if (rowIndex % 2) page.drawRectangle({ x: 28, y: y - 7, width: 780, height: 25, color: rgb(0.97, 0.98, 0.99) });
-        drawText(page, bold, worker.nombre_trabajador || "-", 34, y, 7, undefined, nameWidth - 12);
-        days.forEach((day, dayIndex) => {
-          const key = `${worker.dni}-${day.toISOString().slice(0, 10)}`;
-          const row = index.get(key);
-          const x = 28 + nameWidth + dayIndex * dayWidth;
-          const color = !row ? rgb(0.86, 0.15, 0.15) : row.justificado ? rgb(0.12, 0.3, 0.7) : row.late ? rgb(0.58, 0.28, 0.03) : rgb(0.08, 0.4, 0.2);
-          const value = !row ? "FALTA" : [row.hora_inicio, row.inicio_receso, row.final_receso, row.hora_final].filter(Boolean).join(" / ") || "-";
-          drawText(page, row ? regular : bold, value, x + 5, y, 6.5, color, dayWidth - 8);
-        });
-        y -= 25;
-      });
-    });
-    week.setDate(week.getDate() + 7);
-    weekNumber += 1;
+    if (days.length) weeks.push(days);
+    cursor.setDate(cursor.getDate() + 7);
   }
+
+  let page = pdf.addPage(pageSize);
+  let y = 558;
+  drawText(page, bold, "Reporte de Asistencias", margin, y, 16, pdfColor(colors.black), 500);
+  y -= 20;
+  drawText(page, regular, `Periodo: ${metadata.label || "-"} · Rango: ${reportDate(metadata.start)} - ${reportDate(metadata.end)} · Generado: ${generated}`, margin, y, 8, pdfColor(colors.dark), pageWidth);
+  y -= 12;
+  page.drawLine({ start: { x: margin, y }, end: { x: margin + pageWidth, y }, thickness: 1.2, color: pdfColor(colors.accent) });
+  y -= 10;
+
+  const metaWidths = [22, 68, 28, 22, 24, 22].map((value) => value * MM);
+  [
+    ["Tienda", metadata.store_label || "Todas las tiendas", "Trabajadores", sortedWorkers.length, "Registros", rows.length],
+    ["Búsqueda", metadata.search || "-", "A tiempo", rows.length - lateCount, "Tardanzas", lateCount],
+  ].forEach((values, rowIndex) => {
+    let x = (pageSize[0] - metaWidths.reduce((total, width) => total + width, 0)) / 2;
+    values.forEach((value, columnIndex) => {
+      const width = metaWidths[columnIndex];
+      cell(page, x, y, width, 19, rowIndex ? colors.light : "#FFFFFF");
+      drawText(page, columnIndex % 2 === 0 ? bold : regular, value, x + 4, y - 13, 7.5, pdfColor(columnIndex % 2 === 0 ? colors.black : colors.dark), width - 8);
+      x += width;
+    });
+    y -= 19;
+  });
+  y -= 9;
+
+  const legend = [
+    ["Leyenda de colores:", colors.light, colors.black, 34], ["Puntual", colors.onFill, colors.onText, 32],
+    ["Tardanza", colors.lateFill, colors.lateText, 34], ["Justificado", colors.justifiedFill, colors.justifiedText, 34],
+    ["Falta", colors.absent, "#FFFFFF", 28], ["Sin marca", colors.light, colors.muted, 30],
+  ];
+  const legendWidth = legend.reduce((total, item) => total + (item[3] * MM), 0);
+  let legendX = (pageSize[0] - legendWidth) / 2;
+  legend.forEach(([label, fill, textColor, widthMm], index) => {
+    const width = widthMm * MM;
+    cell(page, legendX, y, width, 21, fill);
+    drawText(page, index === 0 ? bold : regular, label, legendX, y - 14, 7, pdfColor(textColor), width, true);
+    legendX += width;
+  });
+  y -= 33;
+
+  const dayNames = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+  const rowLines = (worker, days) => days.map((day) => {
+    const row = attendance.get(`${String(worker.dni || "").trim()}-${isoDate(day)}`);
+    if (!row) return 1;
+    const count = [row.hora_inicio, row.inicio_receso, row.final_receso, row.hora_final]
+      .map(formatTime).filter(Boolean).length;
+    return Math.max(count + (row.justificado && row.fuera_horario ? 1 : 0), 1);
+  });
+  const workerRowHeight = (worker, days) => Math.max(18, Math.max(...rowLines(worker, days)) * 6.2 + 5);
+  const drawWeek = (days, weekNumber, offset, chunk, continued) => {
+    drawText(page, bold, `Semana ${weekNumber} · ${dateLabel(days[0])} - ${dateLabel(days.at(-1))}${continued ? " (continuación)" : ""}`, margin, y, 8, pdfColor("#1E40AF"), pageWidth);
+    y -= 12;
+    const tableWidth = 246 * MM;
+    const tableX = (pageSize[0] - tableWidth) / 2;
+    const numberWidth = 8 * MM;
+    const workerWidth = 42 * MM;
+    const dayWidth = (tableWidth - numberWidth - workerWidth) / days.length;
+    const headerHeight = 28;
+    let x = tableX;
+    [[numberWidth, "N°"], [workerWidth, "Trabajador"]].forEach(([width, label], index) => {
+      cell(page, x, y, width, headerHeight, colors.header);
+      drawText(page, bold, label, x + (index ? 4 : 0), y - 17, 7.5, rgb(1, 1, 1), width - (index ? 8 : 0), !index);
+      x += width;
+    });
+    days.forEach((day) => {
+      cell(page, x, y, dayWidth, headerHeight, colors.header);
+      drawText(page, bold, dayNames[day.getDay() - 1], x, y - 12, 7, rgb(1, 1, 1), dayWidth, true);
+      drawText(page, bold, dateLabel(day), x, y - 22, 7, rgb(1, 1, 1), dayWidth, true);
+      x += dayWidth;
+    });
+    y -= headerHeight;
+
+    chunk.forEach((worker, chunkIndex) => {
+      const rowHeight = workerRowHeight(worker, days);
+      const alternate = (offset + chunkIndex) % 2 ? colors.alternate : "#FFFFFF";
+      const centerBaseline = y - (rowHeight / 2) - 2.5;
+      let cellX = tableX;
+      cell(page, cellX, y, numberWidth, rowHeight, alternate);
+      drawText(page, regular, offset + chunkIndex + 1, cellX, centerBaseline, 7, pdfColor(colors.muted), numberWidth, true);
+      cellX += numberWidth;
+      cell(page, cellX, y, workerWidth, rowHeight, alternate);
+      drawText(page, bold, worker.nombre_trabajador || "-", cellX + 4, centerBaseline, 7, pdfColor(colors.black), workerWidth - 8);
+      cellX += workerWidth;
+      days.forEach((day) => {
+        const row = attendance.get(`${String(worker.dni || "").trim()}-${isoDate(day)}`);
+        let lines = ["FALTA"];
+        let fill = colors.absent;
+        let textColor = "#FFFFFF";
+        if (row) {
+          lines = [row.hora_inicio, row.inicio_receso, row.final_receso, row.hora_final].map(formatTime).filter(Boolean);
+          fill = colors.light;
+          textColor = colors.muted;
+          if (lines.length) {
+            if (row.justificado && row.fuera_horario) {
+              lines = ["JUSTIFICADO", ...lines];
+              fill = colors.justifiedFill;
+              textColor = colors.justifiedText;
+            } else if (row.late) {
+              fill = colors.lateFill;
+              textColor = colors.lateText;
+            } else {
+              fill = colors.onFill;
+              textColor = colors.onText;
+            }
+          } else lines = ["-"];
+        }
+        cell(page, cellX, y, dayWidth, rowHeight, fill);
+        const lineHeight = 6.2;
+        const firstY = y - ((rowHeight - (lines.length * lineHeight)) / 2) - 5.3;
+        lines.forEach((line, lineIndex) =>
+          drawText(page, bold, line, cellX, firstY - (lineIndex * lineHeight), 6, pdfColor(textColor), dayWidth, true));
+        cellX += dayWidth;
+      });
+      y -= rowHeight;
+    });
+    y -= 14;
+  };
+
+  weeks.forEach((days, weekIndex) => {
+    let offset = 0;
+    let continued = false;
+    while (offset < sortedWorkers.length || (!sortedWorkers.length && offset === 0)) {
+      if (y < 110) {
+        page = pdf.addPage(pageSize);
+        y = 558;
+        continued = offset > 0;
+      }
+      const chunk = [];
+      let usedHeight = 0;
+      for (const worker of sortedWorkers.slice(offset)) {
+        const height = workerRowHeight(worker, days);
+        if (chunk.length && usedHeight + height > y - 90) break;
+        chunk.push(worker);
+        usedHeight += height;
+      }
+      drawWeek(days, weekIndex + 1, offset, chunk, continued);
+      if (!sortedWorkers.length) break;
+      offset += chunk.length;
+      continued = offset > 0;
+    }
+  });
+
+  if (y < 45) {
+    page = pdf.addPage(pageSize);
+    y = 558;
+  }
+  page.drawLine({ start: { x: margin, y: y - 2 }, end: { x: margin + pageWidth, y: y - 2 }, thickness: 0.4, color: pdfColor(colors.muted) });
+  const footer = safeText(`Generado el ${generated} | ${sortedWorkers.length} trabajadores | ${rows.length} registros | ${rows.length - lateCount} a tiempo | ${lateCount} tardanzas`);
+  page.drawText(footer, {
+    x: margin + pageWidth - regular.widthOfTextAtSize(footer, 6.5),
+    y: y - 13,
+    size: 6.5,
+    font: regular,
+    color: pdfColor(colors.muted),
+  });
   return Buffer.from(await pdf.save());
 }
