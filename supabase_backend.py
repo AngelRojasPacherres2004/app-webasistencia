@@ -351,3 +351,48 @@ def get_admin_login_diagnostics():
         diagnostics["error"] = str(exc)
 
     return diagnostics
+
+
+def prepare_worker_schedule(selected_days, schedule):
+    from datetime import time
+    if not selected_days:
+        raise ValueError("Selecciona al menos un día laborable.")
+    rows = []
+    for day in selected_days:
+        values = schedule.get(day, {})
+        parsed = {}
+        for field in ("hora_inicio", "inicio_receso", "final_receso", "hora_final"):
+            value = values.get(field)
+            try:
+                parsed[field] = time.fromisoformat(str(value)) if value else None
+            except ValueError:
+                raise ValueError(f"{day.capitalize()}: hora inválida.") from None
+        entry, start, end, exit_time = (parsed[k] for k in ("hora_inicio", "inicio_receso", "final_receso", "hora_final"))
+        if entry is None or exit_time is None or entry >= exit_time:
+            raise ValueError(f"{day.capitalize()}: la salida debe ser posterior a la entrada.")
+        if (start is None) != (end is None):
+            raise ValueError(f"{day.capitalize()}: completa ambas horas del receso o deja ambas vacías.")
+        if start is not None and not (entry <= start < end <= exit_time):
+            raise ValueError(f"{day.capitalize()}: el receso debe estar dentro de la jornada y terminar después de comenzar.")
+        rows.append({"dia_semana": day, "horario_entrada": entry,
+                     "horario_inicio_receso": start, "horario_fin_receso": end,
+                     "horario_salida": exit_time})
+    return rows
+
+
+def save_worker_and_schedule(worker_data, selected_days, schedule):
+    rows = prepare_worker_schedule(selected_days, schedule)
+    payload = dict(worker_data)
+    columns = list(payload)
+    query = sql.SQL("INSERT INTO trabajador ({columns}) VALUES ({values}) ON CONFLICT (dni) DO UPDATE SET {updates}").format(
+        columns=sql.SQL(", ").join(map(sql.Identifier, columns)),
+        values=sql.SQL(", ").join(sql.Placeholder() for _ in columns),
+        updates=sql.SQL(", ").join(sql.SQL("{} = EXCLUDED.{}").format(sql.Identifier(k), sql.Identifier(k)) for k in columns if k != "dni"),
+    )
+    with closing(get_connection()) as connection:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, list(payload.values()))
+                cursor.execute("DELETE FROM horario_trabajador WHERE dni_trabajador = %s", [payload["dni"]])
+                for row in rows:
+                    cursor.execute("INSERT INTO horario_trabajador (dni_trabajador, dia_semana, horario_entrada, horario_inicio_receso, horario_fin_receso, horario_salida) VALUES (%s, %s, %s, %s, %s, %s)", [payload["dni"], *row.values()])

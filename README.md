@@ -51,3 +51,9 @@ En el resumen se muestran los registros leidos desde PostgreSQL para `tienda`, `
 Cada asistencia se guarda en `asistencia` con `dni_trabajador`, `fecha` y las marcas `timestamptz` reales (`horario_entrada`, `horario_inicio_receso`, `horario_fin_receso`, `horario_salida`).
 # asistencia-web
 # app-webasistencia
+
+## Horarios sin receso y rango de asistencia
+
+Si Supabase rechaza jornadas sin receso con `horario_trabajador_orden_valido`, ejecutar `sql/horarios_sin_receso.sql` en el SQL Editor. La restricción admite entrada y salida con ambas horas de receso vacías, y sigue validando el orden de las horas. Si existen horarios inválidos, la operación se revierte para permitir corregirlos primero.
+
+En Asistencias, elegir Desde y Hasta (ambos incluidos). La tabla y las descargas PDF y Excel usan ese mismo rango y los filtros de tienda, búsqueda y persona. Los registros pendientes de justificar conservan su tratamiento actual y se indican al exportar.

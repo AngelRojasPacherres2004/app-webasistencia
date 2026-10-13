@@ -574,6 +574,9 @@ def _render_worker_form(api, worker=None):
             st.error(password_error)
             return None
 
+        from supabase_backend import prepare_worker_schedule
+        prepare_worker_schedule(selected_days, horario)
+
         doc_id = str(dni).strip()
         tienda = tienda_options[tienda_label]
         photo_url = existing_photo
@@ -599,7 +602,6 @@ def _render_worker_form(api, worker=None):
         if str(password or "").strip():
             worker_data["contrasena"] = str(password).strip()
 
-        api.create_document(api.WORKER_COLLECTION, doc_id, worker_data)
         api.save_worker_schedule(worker_data, selected_days, horario)
         st.session_state["worker_success_message"] = f"Trabajador guardado -> `{api.WORKER_COLLECTION}/{doc_id}`"
         api.invalidate_collection_cache(api.WORKER_COLLECTION)

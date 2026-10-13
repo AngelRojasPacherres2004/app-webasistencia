@@ -608,21 +608,8 @@ def _combine_local_datetime(fecha_value, hora_value):
 def save_worker_with_schedule(worker_data, selected_days, schedule):
     if isinstance(worker_data, str):
         worker_data = {"dni": worker_data}
-    dni = worker_data["dni"]
-    upsert_document(WORKER_COLLECTION, dni, worker_data, key_field="dni")
-    from supabase_backend import delete_rows, insert_document
-
-    delete_rows("horario_trabajador", [("dni_trabajador", "eq", dni)])
-    for day in selected_days:
-        day_schedule = schedule.get(day, {})
-        insert_document("horario_trabajador", {
-            "dni_trabajador": dni,
-            "dia_semana": day,
-            "horario_entrada": day_schedule.get("hora_inicio") if day_schedule.get("hora_inicio") not in (None, "") else "00:00",
-            "horario_inicio_receso": day_schedule.get("inicio_receso") or None,
-            "horario_fin_receso": day_schedule.get("final_receso") or None,
-            "horario_salida": day_schedule.get("hora_final") if day_schedule.get("hora_final") not in (None, "") else "00:00",
-        })
+    from supabase_backend import save_worker_and_schedule
+    save_worker_and_schedule(worker_data, selected_days, schedule)
 
 
 def save_attendance_record(attendance_data):

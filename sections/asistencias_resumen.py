@@ -528,7 +528,7 @@ def _build_attendance_pdf(period_label, selected_store_label, search_query,
         week_num = 1
         while cursor <= end:
             days = []
-            for i in range(6):  # lunes=0 ... sÃ¡bado=5
+            for i in range(7):  # lunes=0 ... sÃ¡bado=5
                 d = cursor + timedelta(days=i)
                 if start <= d <= end:
                     days.append(d)
@@ -608,7 +608,7 @@ def _build_attendance_pdf(period_label, selected_store_label, search_query,
     story.append(Spacer(1, 4*mm))
 
     # â”€â”€ TABLAS POR SEMANA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    DAY_NAMES = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado"]
+    DAY_NAMES = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"]
 
     for week_num, week_days in weeks:
         # encabezado de semana
@@ -760,6 +760,7 @@ def _render_weekly_matrix(workers, attendance_map, days, schedule_map):
         3: "Jueves",
         4: "Viernes",
         5: "Sábado",
+        6: "Domingo",
     }
     today = date.today()
     for worker in workers:
@@ -890,16 +891,18 @@ def render_resumen(api=None):
         f"{s['nombre_tienda']} Â· {s['id_tienda']}": s for s in tiendas
     })
 
-    if "resumen_week" not in st.session_state:
-        all_dates = [_parse_date(r.get("fecha")) for r in asistencias if _parse_date(r.get("fecha"))]
-        st.session_state["resumen_week"] = max(all_dates) if all_dates else date.today()
-
-    current_start = _week_start(st.session_state["resumen_week"])
-    week_end = current_start + timedelta(days=6)
-    week_days = [current_start + timedelta(days=i) for i in range(6)]
+    all_dates = [d for r in asistencias if (d := _parse_date(r.get("fecha")))]
+    reference = max(all_dates) if all_dates else date.today()
+    dc1, dc2 = st.columns(2)
+    current_start = dc1.date_input("Desde", value=_week_start(reference), key="resumen_desde")
+    week_end = dc2.date_input("Hasta", value=reference, key="resumen_hasta")
+    if current_start > week_end:
+        st.error("La fecha Desde debe ser anterior o igual a Hasta.")
+        return
+    week_days = [current_start + timedelta(days=i) for i in range((week_end - current_start).days + 1)]
 
     # Filtros y navegación semanal
-    sc1, sc2, sc3, sc4, sc5 = st.columns([2.2, 1.3, 1.8, 0.75, 0.75])
+    sc1, sc2, sc3 = st.columns([2.2, 1.3, 1.8])
     search_query = sc1.text_input(
         "Buscar", placeholder="Nombre, DNI o sede...",
         key="resumen_search", label_visibility="collapsed",
@@ -917,13 +920,6 @@ def render_resumen(api=None):
         "Persona", options=worker_options,
         index=0, key="resumen_worker_filter", label_visibility="collapsed",
     )
-    if sc4.button("⬅", use_container_width=True, key="resumen_prev_button", help="Semana anterior"):
-        st.session_state["resumen_week"] = current_start - timedelta(days=7)
-        st.rerun()
-    if sc5.button("➡", use_container_width=True, key="resumen_next_button", help="Semana siguiente"):
-        st.session_state["resumen_week"] = current_start + timedelta(days=7)
-        st.rerun()
-
     schedule_map = _build_schedule_map(horarios)
     _apply_late_flag(asistencias, schedule_map)
 
@@ -972,7 +968,7 @@ def render_resumen(api=None):
     )
 
     st.markdown('<div style="height:1rem"></div>', unsafe_allow_html=True)
-    st.caption(f"Semana: `{_week_label(current_start)}`")
+    st.caption(f"Periodo: `{range_label}`")
 
     st.markdown(
         """
@@ -1017,18 +1013,10 @@ def render_resumen(api=None):
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     ex1, ex2, ex3, ex4 = st.columns([1.1, 1.1, 1.0, 1.0])
 
-    export_period = ex1.selectbox(
-        "Periodo PDF", ["Mes", "Quincena"],
-        index=0, key="resumen_export_period",
-    )
-    export_reference = ex2.date_input(
-        "Referencia PDF",
-        value=st.session_state.get("resumen_week", date.today()),
-        key="resumen_export_reference",
-    )
-    st.caption("El PDF y el Excel respetan los filtros activos de tienda, busqueda y persona.")
+    export_start, export_end = current_start, week_end
+    period_label = range_label
+    st.caption("El PDF y el Excel respetan el rango Desde/Hasta y los filtros activos.")
 
-    export_start, export_end, period_label = _period_bounds(export_period, export_reference)
     export_rows = _collect_period_rows(
         filtered_asistencias, filtered_workers,
         export_start, export_end, schedule_map,
@@ -1036,6 +1024,8 @@ def render_resumen(api=None):
     pending_justifications = [
         row for row in filtered_asistencias
         if _is_justificable_row(row, schedule_map)
+        and (parsed := _parse_date(row.get("fecha")))
+        and export_start <= parsed <= export_end
     ]
 
     if export_rows:
