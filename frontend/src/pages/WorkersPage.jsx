@@ -79,7 +79,7 @@ function WorkerForm({ worker, stores, onClose, onSaved, notify }) {
           <Field label="Estado"><select value={String(form.estado)} onChange={(event) => set("estado", event.target.value === "true")}><option value="true">Activo</option><option value="false">Inactivo</option></select></Field>
         </div>
         <div className="schedule">
-          <div className="schedule__title"><div><h3>Horario semanal</h3><p>Activa los días laborables y define las cuatro marcas.</p></div><Badge tone="blue">{days.length} días</Badge></div>
+          <div className="schedule__title"><div><h3>Horario semanal</h3><p>Define entrada y salida. Si no hay receso, deja ambas horas de receso vacías.</p></div><Badge tone="blue">{days.length} días</Badge></div>
           {DAYS.map(([day, label]) => (
             <div className={`schedule-row ${days.includes(day) ? "" : "schedule-row--off"}`} key={day}>
               <label className="day-toggle"><input type="checkbox" checked={days.includes(day)} onChange={() => toggleDay(day)} /><span>{label}</span></label>

@@ -322,6 +322,27 @@ export async function checkCredentials(username, password) {
   );
 }
 
+export function normalizeWorkerSchedules(dni, schedules) {
+  return schedules.map((item) => {
+    const day = String(item.dia_semana || "");
+    const readTime = (field) => {
+      const value = String(item[field] ?? "").trim();
+      if (!value) return null;
+      if (!/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)) throw new ApiError(422, `${day}: hora inválida.`);
+      return value.length === 5 ? `${value}:00` : value;
+    };
+    const entry = readTime("horario_entrada");
+    const start = readTime("horario_inicio_receso");
+    const end = readTime("horario_fin_receso");
+    const exit = readTime("horario_salida");
+    if (!entry || !exit || entry >= exit) throw new ApiError(422, `${day}: la salida debe ser posterior a la entrada.`);
+    if ((start === null) !== (end === null)) throw new ApiError(422, `${day}: completa ambas horas del receso o deja ambas vacías.`);
+    if (start !== null && !(entry <= start && start < end && end <= exit)) throw new ApiError(422, `${day}: el receso debe comenzar y terminar dentro de la jornada, en orden.`);
+    return { dni_trabajador: dni, dia_semana: day, horario_entrada: entry,
+      horario_inicio_receso: start, horario_fin_receso: end, horario_salida: exit };
+  });
+}
+
 export async function saveWorker(dni, payload, creating) {
   if (!dni || !String(payload.nombre || "").trim()) throw new ApiError(422, "DNI y nombre son obligatorios.");
   if (!String(payload.id_tienda || "").trim()) throw new ApiError(422, "Selecciona una tienda.");
@@ -340,14 +361,7 @@ export async function saveWorker(dni, payload, creating) {
   };
   if (String(payload.password || "").trim()) data.contrasena = String(payload.password).trim();
   const sql = db();
-  const schedules = payload.schedules.map((item) => ({
-    dni_trabajador: dni,
-    dia_semana: item.dia_semana,
-    horario_entrada: item.horario_entrada || "00:00",
-    horario_inicio_receso: item.horario_inicio_receso || "00:00",
-    horario_fin_receso: item.horario_fin_receso || "00:00",
-    horario_salida: item.horario_salida || "00:00",
-  }));
+  const schedules = normalizeWorkerSchedules(dni, payload.schedules);
   await sql.begin(async (tx) => {
     if (data.contrasena !== undefined) {
       await tx`

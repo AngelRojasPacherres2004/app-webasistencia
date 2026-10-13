@@ -31,8 +31,8 @@ def replace_worker_schedule(dni: str, schedules: list[dict]) -> None:
                         dni,
                         item["dia_semana"],
                         item.get("horario_entrada") or "00:00",
-                        item.get("horario_inicio_receso") or "00:00",
-                        item.get("horario_fin_receso") or "00:00",
+                        item.get("horario_inicio_receso") or None,
+                        item.get("horario_fin_receso") or None,
                         item.get("horario_salida") or "00:00",
                     ],
                 )
