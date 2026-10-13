@@ -343,9 +343,16 @@ def attendance_result(
     store_id: str,
     worker_dni: str,
     q: str,
+    start_value: str = "",
+    end_value: str = "",
 ) -> tuple[dict, str]:
     selected = parse_date(reference) or date.today()
-    if period == "week":
+    if period == "range":
+        start, end = parse_date(start_value), parse_date(end_value)
+        if not start or not end or start > end:
+            raise HTTPException(422, "Rango de fechas no válido.")
+        label = f"Desde {start.isoformat()} hasta {end.isoformat()}"
+    elif period == "week":
         start, end, label = week_bounds(selected)
     elif period == "fortnight":
         start, end, label = fortnight_bounds(selected)
@@ -395,9 +402,11 @@ def attendance(
     store_id: str = "",
     worker_dni: str = "",
     q: str = "",
+    start: str = "",
+    end: str = "",
 ):
     result, _label = attendance_result(
-        period, reference, store_id, worker_dni, q
+        period, reference, store_id, worker_dni, q, start, end
     )
     return result
 
@@ -422,9 +431,11 @@ def export_attendance(
     store_id: str = "",
     worker_dni: str = "",
     q: str = "",
+    start: str = "",
+    end: str = "",
 ):
     result, label = attendance_result(
-        period, reference, store_id, worker_dni, q
+        period, reference, store_id, worker_dni, q, start, end
     )
     metadata = {**result, "label": label}
     period_slug = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")

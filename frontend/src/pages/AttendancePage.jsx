@@ -10,6 +10,7 @@ const WEEK_DAYS = [
   ["jueves", "Jueves"],
   ["viernes", "Viernes"],
   ["sabado", "Sábado"],
+  ["domingo", "Domingo"],
 ];
 
 const toIsoDate = (date) =>
@@ -57,7 +58,8 @@ const weeksForMonth = (reference) => {
 };
 
 const effectiveFilters = (values) => {
-  const { week_reference: weekReference, ...base } = values;
+  const { week_reference: weekReference, start, end, ...base } = values;
+  if (values.period === "range") return { ...base, start, end };
   return weekReference
     ? { ...base, period: "week", reference: weekReference }
     : base;
@@ -134,7 +136,9 @@ export default function AttendancePage({ notify }) {
   const today = useMemo(todayInLima, []);
   const [catalog, setCatalog] = useState({ stores: [], workers: [] });
   const [filters, setFilters] = useState({
-    period: "month",
+    period: "range",
+    start: `${today.slice(0, 7)}-01`,
+    end: today,
     reference: `${today.slice(0, 7)}-01`,
     week_reference: "",
     store_id: "",
@@ -142,6 +146,7 @@ export default function AttendancePage({ notify }) {
     q: "",
   });
   const [data, setData] = useState(null);
+  const [appliedFilters, setAppliedFilters] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [page, setPage] = useState(0);
@@ -150,8 +155,10 @@ export default function AttendancePage({ notify }) {
     setLoading(true);
     setError("");
     try {
+      if (next.period === "range" && (!next.start || !next.end || next.start > next.end)) throw new Error("Selecciona un rango válido: Desde debe ser anterior o igual a Hasta.");
       const result = await get(`/api/attendance?${query(effectiveFilters(next))}`);
       setData(result);
+      setAppliedFilters({ ...next });
       setPage(0);
     } catch (requestError) {
       setError(requestError.message);
@@ -201,7 +208,7 @@ export default function AttendancePage({ notify }) {
 
   const exportReport = async (kind) => {
     try {
-      await download(`/api/attendance/export.${kind}?${query(effectiveFilters(filters))}`);
+      await download(`/api/attendance/export.${kind}?${query(effectiveFilters(appliedFilters))}`);
       notify("Reporte generado correctamente.");
     } catch (requestError) {
       notify(requestError.message, "error");
@@ -212,16 +219,21 @@ export default function AttendancePage({ notify }) {
     <>
       <PageHeader
         title="Resumen de asistencias"
-        subtitle="Revisa la semana de cada trabajador de un vistazo."
-        actions={<><Button variant="secondary" onClick={() => exportReport("xlsx")}>↓ Excel</Button><Button variant="secondary" onClick={() => exportReport("pdf")}>↓ PDF</Button></>}
+        subtitle="Elige Desde y Hasta, aplica los filtros y descarga el mismo rango en PDF o Excel."
+        actions={<><Button variant="secondary" disabled={loading || !appliedFilters} onClick={() => exportReport("xlsx")}>↓ Excel</Button><Button variant="secondary" disabled={loading || !appliedFilters} onClick={() => exportReport("pdf")}>↓ PDF</Button></>}
       />
       <Card className="filters">
         <Field label="Periodo">
           <select value={filters.period} onChange={(event) => update("period", event.target.value)}>
+            <option value="range">Rango de fechas</option>
             <option value="month">Mes</option>
             <option value="fortnight">Quincena</option>
           </select>
         </Field>
+        {filters.period === "range" ? <>
+          <Field label="Desde"><input type="date" value={filters.start} onChange={(event) => update("start", event.target.value)} /></Field>
+          <Field label="Hasta"><input type="date" value={filters.end} min={filters.start} onChange={(event) => update("end", event.target.value)} /></Field>
+        </> : <>
         <Field label="Mes de referencia">
           <input
             type="month"
@@ -235,6 +247,7 @@ export default function AttendancePage({ notify }) {
             {monthWeeks.map((week) => <option key={week.value} value={week.value}>{week.label}</option>)}
           </select>
         </Field>
+        </>}
         <Field label="Tienda">
           <select value={filters.store_id} onChange={(event) => update("store_id", event.target.value)}>
             <option value="">Todas las tiendas</option>

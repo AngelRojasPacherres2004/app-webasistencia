@@ -39,6 +39,8 @@ const requiredPassword = (password, required = false) => {
 const apiFilters = (url) => ({
   period: url.searchParams.get("period") || "month",
   reference: url.searchParams.get("reference") || "",
+  start: url.searchParams.get("start") || "",
+  end: url.searchParams.get("end") || "",
   store_id: url.searchParams.get("store_id") || "",
   worker_dni: url.searchParams.get("worker_dni") || "",
   q: url.searchParams.get("q") || "",

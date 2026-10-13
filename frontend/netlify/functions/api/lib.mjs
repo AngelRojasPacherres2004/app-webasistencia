@@ -82,7 +82,13 @@ const localDate = (value) => {
 export const isoDate = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
-export function periodBounds(reference, period) {
+export function periodBounds(reference, period, startValue, endValue) {
+  if (period === "range") {
+    const start = localDate(startValue);
+    const end = localDate(endValue);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startValue || "") || !/^\d{4}-\d{2}-\d{2}$/.test(endValue || "") || !start || !end || isoDate(start) !== startValue || isoDate(end) !== endValue || start > end) throw new ApiError(422, "Rango de fechas no válido.");
+    return { start, end, label: `Desde ${startValue} hasta ${endValue}` };
+  }
   const selected = localDate(reference) || new Date();
   const year = selected.getFullYear();
   const month = selected.getMonth();
@@ -222,7 +228,7 @@ export async function loadDashboard(includeAttendances = true) {
 }
 
 export function attendancePeriod(dashboard, filters) {
-  const { start, end, label } = periodBounds(filters.reference, filters.period);
+  const { start, end, label } = periodBounds(filters.reference, filters.period, filters.start, filters.end);
   const query = String(filters.q || "").trim().toLowerCase();
   let workers = dashboard.workers.filter((worker) =>
     (!filters.store_id || worker.id_sede === filters.store_id) &&
