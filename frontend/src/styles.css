@@ -370,6 +370,23 @@ td strong { color: #1b344d; }
 .config-card__actions { display: flex; gap: 8px; }
 .config-card__actions .button { flex: 1; }
 
+.attendance-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+.attendance-tabs button { padding: 12px 20px; border: 1px solid #c9ddee; border-radius: 12px; background: #fff; color: #254e73; font: inherit; font-weight: 700; cursor: pointer; }
+.attendance-tabs button.is-active { background: #254e73; border-color: #254e73; color: #fff; }
+.location-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.location-layout { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 22px; align-items: start; }
+.location-history, .location-map { min-width: 0; }
+.location-list { margin-top: 16px; max-height: 590px; overflow-y: auto; display: grid; gap: 10px; padding: 3px; }
+.location-mark { width: 100%; padding: 14px; display: grid; gap: 7px; text-align: left; font: inherit; font-size: 13px; color: #25415d; border: 1px solid #d6e3ef; border-radius: 12px; background: #f9fcff; cursor: pointer; }
+.location-mark--selected { background: #eaf5ff; border-color: #2876b4; box-shadow: inset 3px 0 #2876b4; }
+.location-mark__heading { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.location-mark small { color: #52708a; }
+.location-map iframe { width: 100%; height: 500px; border: 0; border-radius: 14px; background: #edf3f8; }
+.location-map__footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; font-size: 13px; }
+.location-note { color: #637c93; font-size: 13px; line-height: 1.6; }
+@media (max-width: 1000px) { .location-layout { grid-template-columns: 1fr; } .location-list { max-height: 340px; } }
+@media (max-width: 590px) { .location-map iframe { height: 360px; } .location-metrics { grid-template-columns: 1fr; } }
+
 .toast {
   position: fixed; z-index: 80; right: 25px; bottom: 25px; width: min(390px, calc(100vw - 50px));
   padding: 13px 14px; display: flex; align-items: center; gap: 10px; border: 1px solid #b9e2d0;

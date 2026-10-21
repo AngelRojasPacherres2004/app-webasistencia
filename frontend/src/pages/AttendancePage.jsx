@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { download, get, query } from "../api";
 import { Badge, Button, Card, Empty, Field, Metric, PageHeader, Pagination, Spinner } from "../ui";
+import AttendanceLocations from "./AttendanceLocations";
 
 const PAGE_SIZE = 12;
 const WEEK_DAYS = [
@@ -133,6 +134,7 @@ function AttendanceCell({ day, row, worker, today }) {
 }
 
 export default function AttendancePage({ notify }) {
+  const [tab, setTab] = useState("summary");
   const today = useMemo(todayInLima, []);
   const [catalog, setCatalog] = useState({ stores: [], workers: [] });
   const [filters, setFilters] = useState({
@@ -215,8 +217,16 @@ export default function AttendancePage({ notify }) {
     }
   };
 
+  const tabs = <nav className="attendance-tabs" aria-label="Vistas de asistencia">
+    <button type="button" className={tab === "summary" ? "is-active" : ""} aria-current={tab === "summary" ? "page" : undefined} onClick={() => setTab("summary")}>Resumen de asistencias</button>
+    <button type="button" className={tab === "locations" ? "is-active" : ""} aria-current={tab === "locations" ? "page" : undefined} onClick={() => setTab("locations")}>Ubicación de marcas</button>
+  </nav>;
+
+  if (tab === "locations") return <>{tabs}<AttendanceLocations catalog={catalog} today={today} /></>;
+
   return (
     <>
+      {tabs}
       <PageHeader
         title="Resumen de asistencias"
         subtitle="Elige Desde y Hasta, aplica los filtros y descarga el mismo rango en PDF o Excel."
